@@ -80,6 +80,13 @@ set_source_files_properties("${CMAKE_SOURCE_DIR}/port/ps4/ps4_relro_pad.cpp" PRO
 # code keeps using it under another name and the C library keeps its own.
 target_compile_definitions(ge007 PRIVATE $<$<COMPILE_LANGUAGE:C>:strtol=ge_n64_strtol>)
 
+# Vulkan: Mesa RADV on GNM runs from its own module, sce_module/libGE64Radv.prx
+# (tools_ps4/build-radv-prx.sh, packaged by tools_ps4/package.sh): linked in,
+# its ~26 MB would push the game's data above 0x01000000 (portaddr.h). The
+# eboot only needs the Vulkan headers.
+set(GE_PS4_MESA_SRC "$ENV{HOME}/dolphinps4-build/src/mesa" CACHE PATH "Mesa source (Vulkan headers)")
+target_include_directories(ge007 PRIVATE "${GE_PS4_MESA_SRC}/include")
+
 target_link_libraries(ge007
   SceSysmodule SceSystemService SceUserService SceAudioOut ScePad SceVideoOut
   ScePigletv2VSH   # referenced by SDL's (unused) PS4 video driver

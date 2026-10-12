@@ -205,3 +205,9 @@ tools_pc/sweep-captures/**/*.ppm
 # referenced by no project tooling. Never commit.
 /Python/
 docs/media/*.mp4
+
+# PS4 build outputs
+/build-ps4/
+/build-ps4-logs/
+/build-ps4-radv/
+/build-clang/

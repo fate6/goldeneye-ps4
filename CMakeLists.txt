@@ -450,6 +450,7 @@ if(PS4)
   list(REMOVE_ITEM SRC_FAST3D
     "${CMAKE_SOURCE_DIR}/port/fast3d/gfx_sdl2.cpp"
     "${CMAKE_SOURCE_DIR}/port/fast3d/gfx_opengl.cpp"
+    "${CMAKE_SOURCE_DIR}/port/fast3d/gfx_vulkan_headless.cpp"
     "${CMAKE_SOURCE_DIR}/port/fast3d/glad/glad.c")
   # (port/ps4/*.c is plain host C, built apart in port/ps4/ps4.cmake.)
   file(GLOB SRC_PS4 "${CMAKE_SOURCE_DIR}/port/ps4/*.cpp")
@@ -621,7 +622,35 @@ set(SRC_ENGINE
 )
 list(PREPEND SRC_ENGINE "${CMAKE_SOURCE_DIR}")
 
+# Vulkan backend shaders (port/fast3d/gfx_vulkan.cpp): GLSL -> SPIR-V C arrays
+# at build time, three interpolation variants (AFFINE, FOG_AFFINE).
+find_program(GLSLANG_VALIDATOR glslangValidator)
+if(NOT GLSLANG_VALIDATOR)
+  message(FATAL_ERROR "glslangValidator not found (Debian/Ubuntu: glslang-tools)")
+endif()
+set(GE_VK_SHADER_DIR "${CMAKE_SOURCE_DIR}/port/fast3d/shaders")
+set(GE_VK_SHADER_OUT "${CMAKE_BINARY_DIR}/port/fast3d")
+set(SRC_VK_SHADERS "")
+foreach(variant 11 10 00)
+  string(SUBSTRING "${variant}" 0 1 _affine)
+  string(SUBSTRING "${variant}" 1 1 _fog_affine)
+  foreach(stage vert frag)
+    set(_name "gfx_vulkan_${stage}_${variant}")
+    add_custom_command(
+      OUTPUT "${GE_VK_SHADER_OUT}/${_name}.h"
+      COMMAND "${CMAKE_COMMAND}" -E make_directory "${GE_VK_SHADER_OUT}"
+      COMMAND "${GLSLANG_VALIDATOR}" -V --target-env vulkan1.3 -DAFFINE=${_affine}
+              -DFOG_AFFINE=${_fog_affine} --vn ${_name} -o "${GE_VK_SHADER_OUT}/${_name}.h"
+              "${GE_VK_SHADER_DIR}/gfx_vulkan.${stage}"
+      DEPENDS "${GE_VK_SHADER_DIR}/gfx_vulkan.${stage}" "${GE_VK_SHADER_DIR}/gfx_vulkan_common.glsl"
+      VERBATIM)
+    list(APPEND SRC_VK_SHADERS "${GE_VK_SHADER_OUT}/${_name}.h")
+  endforeach()
+endforeach()
+include_directories("${GE_VK_SHADER_OUT}")
+
 set(SRC
+  ${SRC_VK_SHADERS}
   ${SRC_GAME}
   ${SRC_PORT}
   ${SRC_ROMASSETS}

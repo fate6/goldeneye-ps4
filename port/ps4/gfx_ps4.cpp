@@ -1,7 +1,7 @@
 // PS4 window-manager backend for fast3d: a fixed 1920x1080 "window" (the TV),
 // frame pacing, and the gfx_sdl_* helpers video.c calls (no GL context here).
-// Presentation (VideoOut flips) arrives with the Vulkan renderer; until then
-// swap_buffers only paces and counts frames.
+// Presentation (VideoOut flips) is in ps4_vulkan.cpp; swap_buffers paces
+// (unless the flips do) and counts frames.
 
 #include <stdint.h>
 #include <time.h>
@@ -15,6 +15,8 @@
 #define PS4_SCREEN_H 1080
 
 extern "C" void (*gfx_pre_swap_hook)(void) = NULL;   // video.c: frame capture
+// Set by ps4_vulkan.cpp: VideoOut flips (vsync) pace the frames, no sleep here.
+extern "C" int gfx_ps4_vsync_paced = 0;
 
 static int target_fps = 0;
 static uint64_t next_frame_us = 0;
@@ -64,7 +66,7 @@ static void ps4_handle_events(void) {}
 static bool ps4_start_frame(void) { return true; }
 
 static void ps4_swap_buffers_begin(void) {
-    if (target_fps > 0) {
+    if (target_fps > 0 && !gfx_ps4_vsync_paced) {
         const uint64_t interval = 1000000ull / (uint64_t)target_fps;
         uint64_t t = now_us();
         if (next_frame_us == 0 || t > next_frame_us + interval) next_frame_us = t;

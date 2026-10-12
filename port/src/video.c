@@ -36,11 +36,25 @@
 #include "../fast3d/gfx_api.h"
 #include "../fast3d/gfx_sdl.h"
 #include "../fast3d/gfx_opengl.h"
+#include "../fast3d/gfx_vulkan.h"
 #if defined(PLATFORM_PS4)
-/* port/ps4: the TV as the window; renderer (null until Vulkan lands). */
+/* port/ps4: the TV as the window, Vulkan (RADV) presenting through VideoOut;
+ * GE_RENDERER=null draws nothing (bring-up). */
 extern struct GfxWindowManagerAPI gfx_ps4;
 extern struct GfxRenderingAPI gfx_null_api;
+extern const struct GfxVulkanPlatform *gfx_ps4_vulkan_platform(void);
 #endif
+
+static struct GfxRenderingAPI *renderingAPI;   /* (defined again below) */
+
+/* GE_PCDUMP / screenshots: read the finished frame from whichever renderer runs. */
+static int videoDumpFrame(uint32_t w, uint32_t h, const char *path)
+{
+    if (renderingAPI == &gfx_vulkan_api) {
+        return gfx_vulkan_dump_screen(path);
+    }
+    return gfx_opengl_dump_bound_fbo(w, h, path);
+}
 
 /* GE's internal resolution before the game's first osViSetMode (which then
  * sets the real CFB size): NTSC 640x480; PAL is taller, not shorter -- the EU
@@ -1035,13 +1049,28 @@ int videoInit(void)
         videoApplyPreset(VIDEO_PRESET_PORT);
     }
 
+    {
+        const char *r = getenv("GE_RENDERER");
 #if defined(PLATFORM_PS4)
-    wmAPI = &gfx_ps4;
-    renderingAPI = &gfx_null_api;
+        wmAPI = &gfx_ps4;
+        if (r && !strcmp(r, "null")) {
+            renderingAPI = &gfx_null_api;
+        } else {
+            renderingAPI = &gfx_vulkan_api;
+            gfx_vulkan_set_platform(gfx_ps4_vulkan_platform());
+        }
 #else
-    wmAPI = &gfx_sdl;
-    renderingAPI = &gfx_opengl_api;
+        wmAPI = &gfx_sdl;
+        renderingAPI = &gfx_opengl_api;
+        if (r && !strcmp(r, "vulkan")) {
+            /* Test path: Vulkan renders offscreen (the window stays empty);
+             * see the frames with GE_PCDUMP. */
+            renderingAPI = &gfx_vulkan_api;
+            gfx_vulkan_set_platform(gfx_vulkan_headless_platform());
+        }
 #endif
+        sysLogPrintf(LOG_INFO, "video: renderer %s", renderingAPI->get_name());
+    }
 
     gfx_current_native_viewport.width = GE_NATIVE_W;
     gfx_current_native_viewport.height = GE_NATIVE_H;
@@ -1409,8 +1438,8 @@ static void videoPreSwapCapture(void)
             ((int)frames - lo) % step == 0) {
             char path[128];
             snprintf(path, sizeof(path), "ppm/frame_%06d.ppm", (int)frames);
-            gfx_opengl_dump_bound_fbo((uint32_t)gfx_current_window_dimensions.width,
-                                      (uint32_t)gfx_current_window_dimensions.height, path);   /* D447: whole window, bars included */
+            videoDumpFrame((uint32_t)gfx_current_window_dimensions.width,
+                           (uint32_t)gfx_current_window_dimensions.height, path);   /* D447: whole window, bars included */
         }
     }
 
@@ -1420,8 +1449,8 @@ static void videoPreSwapCapture(void)
         char path[128];
         GE_MKDIR("ppm");
         snprintf(path, sizeof(path), "ppm/shot_%03d.ppm", shotNum++);
-        if (gfx_opengl_dump_bound_fbo((uint32_t)gfx_current_window_dimensions.width,
-                                      (uint32_t)gfx_current_window_dimensions.height, path)) {
+        if (videoDumpFrame((uint32_t)gfx_current_window_dimensions.width,
+                           (uint32_t)gfx_current_window_dimensions.height, path)) {
             sysLogPrintf(LOG_INFO, "video: screenshot -> %s "
                          "(view with tools_pc/ppm2bmp.py)", path);
         } else {

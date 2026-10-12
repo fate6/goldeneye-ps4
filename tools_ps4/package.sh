@@ -18,10 +18,14 @@ eboot="$BUILD/ge007_eboot/eboot.bin"
 [ -f "$eboot" ] || { echo "no eboot.bin: run tools_ps4/build.sh first" >&2; exit 1; }
 [ -f "$ICON" ] || { echo "no icon at $ICON (set GE_PS4_ICON)" >&2; exit 1; }
 
+prx="$SRC/build-ps4-radv/libGE64Radv.prx"
+[ -f "$prx" ] || { echo "no $prx: run tools_ps4/build-radv-prx.sh" >&2; exit 1; }
+
 stage="$BUILD/stage"
 rm -rf "$stage"
-mkdir -p "$stage/sce_sys"
+mkdir -p "$stage/sce_sys" "$stage/sce_module"
 cp "$eboot" "$stage/"
+cp "$prx" "$stage/sce_module/"   # the Vulkan driver (port/ps4/ps4_vulkan.cpp)
 cp "$ICON" "$stage/sce_sys/icon0.png"
 # Plain homebrew identity: Vulkan through RADV, no Piglet modules bundled.
 pkg="$(SFO_STYLE=plain DOLPHIN_PS4_MODULES_DIR=/nonexistent \
@@ -31,4 +35,8 @@ echo "package: $pkg"
 if [ "${2:-}" = upload ]; then
     curl -sS --max-time 300 -T "$pkg" "$HOST/data/pkg/"
     echo "uploaded $(basename "$pkg")"
+    # The previous run's diagnostics (our folder only; never other apps' data).
+    lftp -e "rm -f /data/GoldenEye64/ge007.log /data/GoldenEye64/crash.log /data/GoldenEye64/xmb-trace.log \
+        /data/GoldenEye64/radv-ps4.log /data/GoldenEye64/samples.log; bye" "$HOST" > /dev/null 2>&1 || true
+    echo "cleared old logs in /data/GoldenEye64"
 fi
