@@ -3367,8 +3367,7 @@ static void gfx_sp_moveword(uint8_t index, uint16_t offset, uintptr_t data) {
         case G_MW_SEGMENT:
             // GE registers segment bases as OS_K0_TO_PHYSICAL(ptr); store the
             // live host pointer so seg_addr() resolves seg+offset correctly.
-            segmentPointers[(offset >> 2) & 0xff] =
-                (data < PORT_DRAM_SIZE && !PORT_IS_IMAGE_ADDR(data)) ? (data + PORT_DRAM_K0_BASE) : data;
+            segmentPointers[(offset >> 2) & 0xff] = (data < PORT_DRAM_SIZE) ? (data + PORT_DRAM_K0_BASE) : data;
             break;
     }
 }
@@ -4088,9 +4087,8 @@ static inline void *seg_addr(uintptr_t w1) {
     }
     // GE passes OS_K0_TO_PHYSICAL(ptr) == ptr - 0x80000000 for RAM that lives
     // in the reserved N64-DRAM region (port/src/dram.c); map it back. The
-    // region is 8 MB, so any offset below 0x800000 came from there (except,
-    // on the PS4, the executable image itself: see portaddr.h).
-    if (w1 < PORT_DRAM_SIZE && !PORT_IS_IMAGE_ADDR(w1)) {
+    // region is 8 MB, so any offset below 0x800000 came from there.
+    if (w1 < PORT_DRAM_SIZE) {
         return (void *)(w1 + PORT_DRAM_K0_BASE);
     }
     // D131: a GBI DL built by game code can reference a COMPILED symbol via

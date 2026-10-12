@@ -20,21 +20,4 @@
 #define PORT_DRAM_SIZE     0x00800000UL  /* 8 MB, like an 8-MB-RAM N64 */
 #endif
 
-/* PS4: the console loads the (PIE) eboot at 0x400000, so the image's own
- * .data/.rodata sit below PORT_DRAM_SIZE -- the range fast3d decodes as
- * K0-physical DRAM offsets. A truncated pointer to a compiled array (e.g.
- * osVirtualToPhysical(&symbol) in a display list) must stay a host pointer.
- * The image (0x400000 .. ~0x1000000) overlaps only DRAM offsets display lists
- * never use (mempools end at 0x2F4400); ps4PlatformInit checks the bounds.
- * The Linux/Windows images sit far above 0x800000. */
-#if !defined(__ASSEMBLER__)
-#if defined(__PS4__)
-extern unsigned long g_portImageLo, g_portImageHi;
-#define PORT_IS_IMAGE_ADDR(a) \
-    ((unsigned long)(a) >= g_portImageLo && (unsigned long)(a) < g_portImageHi)
-#else
-#define PORT_IS_IMAGE_ADDR(a) 0
-#endif
-#endif /* !__ASSEMBLER__ */
-
 #endif /* PORT_PORTADDR_H */

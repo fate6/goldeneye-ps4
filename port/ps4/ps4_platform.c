@@ -46,7 +46,6 @@ void *__real_mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off
 
 extern char __text_start[];
 
-unsigned long g_portImageLo, g_portImageHi;   /* portaddr.h */
 
 static int s_logFd = -1;
 
@@ -127,22 +126,22 @@ void ps4Halt(const char *why)
 
 static void ps4RecordImageRange(void)
 {
-    uintptr_t lo = (uintptr_t)__text_start, hi = lo;
+    /* A read-only object: .rodata comes first after the code and the dynamic
+     * linking tables, so it shows where the image's data begins. */
+    static const char rodata_probe[] = "GoldenEye 64 rodata";
+    uintptr_t lo = (uintptr_t)__text_start, hi = lo, data = (uintptr_t)rodata_probe;
     Ps4VQInfo info;
-    while (ps4NextMapping(hi, &info) && (uintptr_t)info.start == hi &&
-           strncmp(info.name, "executable", 10) == 0) {
+    while (ps4NextMapping(hi, &info) && strncmp(info.name, "executable", 10) == 0) {
         hi = (uintptr_t)info.end;
     }
-    g_portImageLo = lo;
-    g_portImageHi = hi;
-    ps4Log("[ps4] image %#lx-%#lx", (unsigned long)lo, (unsigned long)hi);
-    /* fast3d's seg_addr (portaddr.h): the image must start above the DRAM
-     * offsets display lists use (mempools end at 0x2F4400) and end below
-     * 0x01000000, where values decode as segmented addresses. (The animation
-     * frame buffer's offset 0x7FFD30 may fall inside; the CPU reads it, it is
-     * not passed to display lists.) */
-    if (lo < 0x2F4400UL || hi > 0x1000000UL) {
-        ps4Log("[ps4] WARNING: image outside 0x2F4400-0x1000000; display lists may break");
+    ps4Log("[ps4] image %#lx-%#lx, data from %#lx", (unsigned long)lo, (unsigned long)hi,
+           (unsigned long)data);
+    /* fast3d's seg_addr: display-list values below 0x800000 are N64 RAM offsets
+     * and from 0x01000000 (segment number set) segment addresses, so whatever
+     * a display list can point at in the image must lie in between (the link
+     * script puts .rodata at 0x800000, port/ps4/ps4.cmake). */
+    if (data < 0x800000UL || hi > 0x1000000UL) {
+        ps4Log("[ps4] WARNING: image data outside 0x800000-0x1000000; display lists will break");
     }
 }
 

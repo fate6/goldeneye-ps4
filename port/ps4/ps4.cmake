@@ -18,8 +18,11 @@ foreach(src ${PS4_RUNTIME_SOURCES})
   get_filename_component(name "${src}" NAME)
   file(READ "${src}" text)
   string(REPLACE "/data/DolphinPS4" "${GE_PS4_DATA_DIR}" text "${text}")
-  string(REPLACE "constexpr int kMaxThreads = 4;" "constexpr int kMaxThreads = 16;" text "${text}")
+  # Static buffers count against the image's 0x01000000 limit (see the link
+  # script note below): 8 sampled threads, no 1 MiB copy buffer (it is chunked).
+  string(REPLACE "constexpr int kMaxThreads = 4;" "constexpr int kMaxThreads = 8;" text "${text}")
   string(REPLACE "constexpr int kMaxWatched = 16," "constexpr int kMaxWatched = 64," text "${text}")
+  string(REPLACE "static uint8_t copy[0x100000];" "static uint8_t copy[0x10000];" text "${text}")
   string(REPLACE
     "    // Preferred: the system flexible memory pool, leaving regular flexible memory to Piglet."
     "    // GoldenEye 64: direct memory first (leaves the system pool to the kernel).\n    const size_t directFirstSizes[] = {512 * MB, 256 * MB};\n    for (size_t direct : directFirstSizes) {\n        if (mspace msp = createDirectHeap(direct))\n            return msp;\n    }\n    // Preferred: the system flexible memory pool, leaving regular flexible memory to Piglet."
@@ -28,6 +31,26 @@ foreach(src ${PS4_RUNTIME_SOURCES})
   set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${src}")
   list(APPEND GE_PS4_RUNTIME_SOURCES "${GE_PS4_PORT_DIR}/${name}")
 endforeach()
+# Image layout. The PS4 loads the eboot at 0x400000. fast3d's seg_addr() reads
+# display-list values below 0x800000 as offsets into the 8 MB N64 RAM (the game
+# uses all of it: e.g. 0x700000 and 0x760000 on the file-select screen) and
+# values from 0x01000000 with a segment number set as segment addresses. So
+# everything a display list can point at in the image - .rodata, .data, .bss -
+# must lie in [0x800000, 0x01000000): start .rodata at link address 0x400000
+# (code needs no such care), and keep the image under 16 MiB.
+# ps4_platform.c checks this at startup.
+file(READ "${PS4_LINK_SCRIPT}" _ge_link)
+if(NOT _ge_link MATCHES "GoldenEye 64 rodata")
+  string(FIND "${_ge_link}" "\t.rodata : ALIGN(0x10) {" _ge_rodata_pos)
+  if(_ge_rodata_pos EQUAL -1)
+    message(FATAL_ERROR "Unexpected ${PS4_LINK_SCRIPT}: no .rodata section to move")
+  endif()
+  string(REPLACE "\t.rodata : ALIGN(0x10) {"
+    "\t/* GoldenEye 64 rodata: at 0x400000 = runtime 0x800000 (port/ps4/ps4.cmake) */\n\t. = MAX(., 0x400000);\n\t.rodata : ALIGN(0x10) {"
+    _ge_link "${_ge_link}")
+  file(WRITE "${PS4_LINK_SCRIPT}" "${_ge_link}")
+endif()
+
 # ps4_dlmalloc.c includes third_party/dlmalloc/malloc.c relative to the runtime.
 list(GET PS4_RUNTIME_SOURCES 0 _ge_ps4_first_runtime_src)
 get_filename_component(_ge_ps4_runtime_dir "${_ge_ps4_first_runtime_src}" DIRECTORY)
