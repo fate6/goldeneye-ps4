@@ -93,7 +93,10 @@ else()
 endif()
 message(STATUS "Target arch: ${TARGET_ARCH} (64bit=${TARGET_IS_64BIT})")
 
-if(WIN32)
+if(PS4)
+  # PS4 (OpenOrbis via DolphinPS4's toolchain; see port/ps4/ps4.cmake).
+  set(TARGET_OS "ps4")
+elseif(WIN32)
   set(TARGET_OS "windows")
 elseif(APPLE)
   set(TARGET_OS "osx")
@@ -164,7 +167,12 @@ configure_file(
 # the toolchain include dir from the compiler location (MinGW/MSYS2 layout:
 # bin/../include) and generate an absolute-path include.
 get_filename_component(_PORT_GCC_DIR "${CMAKE_C_COMPILER}" DIRECTORY)
-get_filename_component(PORT_HOST_STRING_H "${_PORT_GCC_DIR}/../include/string.h" ABSOLUTE)
+# PS4 (cross build): the C library headers are not next to the compiler; the
+# PS4 build points PORT_HOST_INCLUDE_DIR at them.
+if(NOT PORT_HOST_INCLUDE_DIR)
+  set(PORT_HOST_INCLUDE_DIR "${_PORT_GCC_DIR}/../include")
+endif()
+get_filename_component(PORT_HOST_STRING_H "${PORT_HOST_INCLUDE_DIR}/string.h" ABSOLUTE)
 configure_file(
   "${CMAKE_SOURCE_DIR}/port/include/hoststring.h.in"
   "${CMAKE_BINARY_DIR}/port/include/hoststring.h" @ONLY)
@@ -173,7 +181,7 @@ configure_file(
 # the include path and shadows the system header; libstdc++'s <thread>/gthr
 # headers in the fast3d C++ TUs need the real <sched.h> (cpu_set_t,
 # sched_yield). Both MinGW and Linux keep <sched.h> at bin/../include.
-get_filename_component(PORT_HOST_SCHED_H "${_PORT_GCC_DIR}/../include/sched.h" ABSOLUTE)
+get_filename_component(PORT_HOST_SCHED_H "${PORT_HOST_INCLUDE_DIR}/sched.h" ABSOLUTE)
 configure_file(
   "${CMAKE_SOURCE_DIR}/port/include/hostsched.h.in"
   "${CMAKE_BINARY_DIR}/port/include/hostsched.h" @ONLY)
@@ -183,7 +191,7 @@ configure_file(
 # one C++ TU (fast3d): MinGW's own sec_api/stdlib_s.h does `#include
 # <stdlib.h>`, which resolves to the N64 header via -I. The shim routes C++
 # TUs to the host header by absolute path (same trick as hoststring.h).
-get_filename_component(PORT_HOST_STDLIB_H "${_PORT_GCC_DIR}/../include/stdlib.h" ABSOLUTE)
+get_filename_component(PORT_HOST_STDLIB_H "${PORT_HOST_INCLUDE_DIR}/stdlib.h" ABSOLUTE)
 configure_file(
   "${CMAKE_SOURCE_DIR}/port/include/hoststdlib.h.in"
   "${CMAKE_BINARY_DIR}/port/include/hoststdlib.h" @ONLY)
@@ -287,7 +295,19 @@ add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Wno-unused-function>)
 # the Plan 9 extensions explicitly there (superset of -fms-extensions: also the
 # automatic base-pointer conversion the idiom relies on). C only — the decomp
 # is C; fast3d C++ does not use `inherits`.
-if(NOT MINGW)
+if(CMAKE_C_COMPILER_ID STREQUAL "Clang")
+  # Clang (the PS4 toolchain) has no -fplan9-extensions. -fms-extensions gives
+  # the embedded-base-struct member access; the base-pointer conversion is a
+  # plain pointer cast, which is the same thing because `inherits` is always
+  # the first member (bondtypes.h). The resulting diagnostics are expected.
+  add_compile_options($<$<COMPILE_LANGUAGE:C>:-fms-extensions>
+                      $<$<COMPILE_LANGUAGE:C>:-Wno-microsoft-anon-tag>
+                      $<$<COMPILE_LANGUAGE:C>:-Wno-incompatible-pointer-types>
+                      $<$<COMPILE_LANGUAGE:C>:-Wno-int-conversion>
+                      $<$<COMPILE_LANGUAGE:C>:-Wno-implicit-function-declaration>
+                      $<$<COMPILE_LANGUAGE:C>:-Wno-implicit-int>
+                      $<$<COMPILE_LANGUAGE:C>:-Wno-return-mismatch>)
+elseif(NOT MINGW)
   add_compile_options($<$<COMPILE_LANGUAGE:C>:-fplan9-extensions>)
   # GCC 14 promoted several long-standing C leniencies to hard errors
   # (int<->pointer for a known prototype, incompatible-pointer arg types,
@@ -352,11 +372,22 @@ include_directories(
 # ----------------------------------------------------------------------------
 set(LIBS "")
 
-find_package(SDL2 REQUIRED)
+if(PS4)
+  # PacBrew's PS4 builds of SDL2 (timers, atomics, audio, controllers; its
+  # video is never initialised) and zlib.
+  set(SDL2_INCLUDE_DIR "${OPENORBIS}/usr/include/SDL2")
+  set(SDL2_LIBRARY "${OPENORBIS}/usr/lib/libSDL2.a")
+  set(ZLIB_INCLUDE_DIR "${OPENORBIS}/usr/include")
+  set(ZLIB_LIBRARY "${OPENORBIS}/usr/lib/libz.a")
+else()
+  find_package(SDL2 REQUIRED)
+endif()
 include_directories(SYSTEM "${SDL2_INCLUDE_DIR}")
 list(APPEND LIBS "${SDL2_LIBRARY}")
 
-find_package(ZLIB REQUIRED)
+if(NOT PS4)
+  find_package(ZLIB REQUIRED)
+endif()
 if(ZLIB_INCLUDE_DIR)
   include_directories(SYSTEM "${ZLIB_INCLUDE_DIR}")
 endif()
@@ -379,7 +410,9 @@ configure_file(
   "${CMAKE_SOURCE_DIR}/port/include/realzlib.h.in"
   "${CMAKE_BINARY_DIR}/port/include/realzlib.h" @ONLY)
 
-if(NOT GL_LIBRARY)
+if(PS4)
+  set(GL_LIBRARY "")
+elseif(NOT GL_LIBRARY)
   if(WIN32)
     set(GL_LIBRARY opengl32)
   elseif(APPLE)
@@ -391,7 +424,9 @@ endif()
 list(APPEND LIBS "${GL_LIBRARY}")
 
 if(NOT EXTRA_LIBRARIES)
-  if(MINGW)
+  if(PS4)
+    set(EXTRA_LIBRARIES "")   # port/ps4/ps4.cmake
+  elseif(MINGW)
     # MinGW: pthreads for the real-OS-thread kernel (port/src/libultra.c).
     set(EXTRA_LIBRARIES dbghelp -static-libstdc++ pthread)
   elseif(WIN32)
@@ -410,6 +445,16 @@ file(GLOB_RECURSE SRC_PORT      "${CMAKE_SOURCE_DIR}/port/src/*.c")
 file(GLOB_RECURSE SRC_PORT_CXX  "${CMAKE_SOURCE_DIR}/port/src/*.cpp")
 file(GLOB_RECURSE SRC_FAST3D    "${CMAKE_SOURCE_DIR}/port/fast3d/*.cpp"
                                "${CMAKE_SOURCE_DIR}/port/fast3d/glad/*.c")
+if(PS4)
+  # No SDL window or OpenGL on the PS4: port/ps4 provides both backends.
+  list(REMOVE_ITEM SRC_FAST3D
+    "${CMAKE_SOURCE_DIR}/port/fast3d/gfx_sdl2.cpp"
+    "${CMAKE_SOURCE_DIR}/port/fast3d/gfx_opengl.cpp"
+    "${CMAKE_SOURCE_DIR}/port/fast3d/glad/glad.c")
+  # (port/ps4/*.c is plain host C, built apart in port/ps4/ps4.cmake.)
+  file(GLOB SRC_PS4 "${CMAKE_SOURCE_DIR}/port/ps4/*.cpp")
+  list(APPEND SRC_FAST3D ${SRC_PS4})
+endif()
 
 # Generated absolute ROM asset symbols for this region (see
 # scripts/gen_romassets.py). Defines every obseg/ramrom/music label and the
@@ -606,6 +651,10 @@ if(WIN32)
   # tools_pc/make_icon.py). Compiled by the resource compiler; ge007.ico is
   # resolved relative to this .rc file.
   target_sources(ge007 PRIVATE cmake/icon/ge007.rc)
+endif()
+
+if(PS4)
+  include("${CMAKE_SOURCE_DIR}/port/ps4/ps4.cmake")
 endif()
 
 message(STATUS "Output binary: ${BIN_NAME}")

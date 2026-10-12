@@ -46,9 +46,15 @@ s32 sub_GAME_7F0D37DC(u32 cycles, u8 specA, u8 port, u8 value);
 
 // data
 s8 D_8004EC30 = 0x0;
+#if defined(PORT) && defined(__clang__)
+/* Clang: see lv.c (the alias attribute instead of `#pragma weak`). */
+extern u8 spec_keyboard_buffer[];
+extern u8 spec_keyboard_row_caps_z_x_c_v __attribute__((weak, alias("spec_keyboard_buffer")));
+#else
 extern u8 spec_keyboard_row_caps_z_x_c_v;
 #pragma weak spec_keyboard_row_caps_z_x_c_v = spec_keyboard_buffer
-u8 spec_keyboard_buffer[] = 
+#endif
+u8 spec_keyboard_buffer[] =
 {
     0xFF, 0xFF, 0xFF, 0xFF,
     0xFF, 0xFF, 0xFF, 0xFF,

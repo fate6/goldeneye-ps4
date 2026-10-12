@@ -23,6 +23,9 @@
   #endif
 #elif defined(__linux__)
   #define PLATFORM_LINUX 1
+#elif defined(__PS4__)
+  /* PS4 (OpenOrbis, FreeBSD kernel): POSIX paths unless noted; see port/ps4/. */
+  #define PLATFORM_PS4 1
 #else
   #error "Unsupported platform"
 #endif

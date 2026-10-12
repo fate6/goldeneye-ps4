@@ -52,6 +52,11 @@
 
 #if defined(PLATFORM_WINDOWS)
 #include <windows.h>
+#elif defined(PLATFORM_PS4)
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <unistd.h>
+#include "../ps4/ps4_platform.h"
 #else
 #define _GNU_SOURCE /* memfd_create — must precede all system headers */
 #include <sys/mman.h>
@@ -64,7 +69,32 @@
 
 void *dramReserve(void)
 {
-#if defined(PLATFORM_WINDOWS)
+#if defined(PLATFORM_PS4)
+    /* No memfd: an unlinked file in the data folder, mapped MAP_SHARED twice
+     * (the views alias; probe-lowmem measured it). */
+    const char *path = PS4_DATA_DIR "/dram.bin";
+    int fd = open(path, O_RDWR | O_CREAT | O_TRUNC, 0600);
+    if (fd < 0) {
+        sysFatalError("dram: cannot create %s", path);
+    }
+    unlink(path);
+    if (ftruncate(fd, DRAM_SIZE) != 0) {
+        sysFatalError("dram: ftruncate failed");
+    }
+    void *v1 = ps4MapFixed(DRAM_V1_BASE, DRAM_SIZE, fd);
+    void *v2 = ps4MapFixed(DRAM_K0_BASE, DRAM_SIZE, fd);
+    close(fd);
+    if (!v1 || !v2) {
+        sysFatalError("dram: could not map DRAM at %p / %p", (void *)DRAM_V1_BASE,
+                      (void *)DRAM_K0_BASE);
+    }
+    ((volatile char *)v1)[0] = 0x5A;
+    if (((volatile char *)v2)[0] != 0x5A) {
+        sysFatalError("dram: V1/V2 views do not share a backing store");
+    }
+    ((volatile char *)v1)[0] = 0;
+    return v1;
+#elif defined(PLATFORM_WINDOWS)
     /* One anonymous section, two views at fixed addresses. */
     SECURITY_ATTRIBUTES sa;
     sa.nLength = sizeof(sa);

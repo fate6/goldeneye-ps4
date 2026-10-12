@@ -427,9 +427,14 @@ void osCreateThread(OSThread *t, OSId id, void (*entry)(void *), void *arg,
  * puts pthread stacks above 4 GiB, so those truncations corrupt. Force each
  * game-thread stack into the low 2 GiB with MAP_32BIT so every such idiom
  * works exactly as on the console. Windows pthread stacks are already low. */
+#if defined(PLATFORM_PS4)
+#include "../ps4/ps4_platform.h"
+#endif
 static void *portAllocLowStack(size_t sz)
 {
-#if defined(MAP_32BIT)
+#if defined(PLATFORM_PS4)
+    return ps4AllocLowStack(sz);   /* fixed region below 2 GiB */
+#elif defined(MAP_32BIT)
     void *p = mmap(NULL, sz, PROT_READ | PROT_WRITE,
                    MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT
 #if defined(MAP_STACK)

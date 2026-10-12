@@ -36,6 +36,11 @@
 #include "../fast3d/gfx_api.h"
 #include "../fast3d/gfx_sdl.h"
 #include "../fast3d/gfx_opengl.h"
+#if defined(PLATFORM_PS4)
+/* port/ps4: the TV as the window; renderer (null until Vulkan lands). */
+extern struct GfxWindowManagerAPI gfx_ps4;
+extern struct GfxRenderingAPI gfx_null_api;
+#endif
 
 /* GE's internal resolution before the game's first osViSetMode (which then
  * sets the real CFB size): NTSC 640x480; PAL is taller, not shorter -- the EU
@@ -137,6 +142,8 @@ extern float portCrosshairHealthRatio(void);   /* input.c: health + armour, 0..2
 
 int portCrosshairStyle(void) { return cfgCrosshairStyle; }
 float portCrosshairScale(void) { return cfgCrosshairSize / 100.0f; }
+
+void portCrosshairTint(s32 *r, s32 *g, s32 *b);
 
 /* Index 0 leaves the authored RED sprite untouched (white env multiplier);
  * index 7 is actual white via its alpha silhouette. */
@@ -1028,8 +1035,13 @@ int videoInit(void)
         videoApplyPreset(VIDEO_PRESET_PORT);
     }
 
+#if defined(PLATFORM_PS4)
+    wmAPI = &gfx_ps4;
+    renderingAPI = &gfx_null_api;
+#else
     wmAPI = &gfx_sdl;
     renderingAPI = &gfx_opengl_api;
+#endif
 
     gfx_current_native_viewport.width = GE_NATIVE_W;
     gfx_current_native_viewport.height = GE_NATIVE_H;

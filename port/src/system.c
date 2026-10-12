@@ -30,6 +30,9 @@
 #endif
 
 #include "system.h"
+#if defined(PLATFORM_PS4)
+#include "../ps4/ps4_platform.h"
+#endif
 
 /* --- Time --------------------------------------------------------------- */
 
@@ -90,6 +93,19 @@ void sysLogPrintf(enum LogLevel level, const char *fmt, ...)
     static const char *tags[] = { "ERROR", "WARN ", "NOTE ", "INFO ", "DEBUG" };
     va_list ap;
     if ((int)level >= 5) level = LOG_DEBUG;
+#if defined(PLATFORM_PS4)
+    {   /* No console on the PS4: one write per line to <data>/ge007.log. */
+        char line[1024];
+        int n = snprintf(line, sizeof(line), "[%s] ", tags[level]);
+        va_start(ap, fmt);
+        int m = vsnprintf(line + n, sizeof(line) - n - 1, fmt, ap);
+        va_end(ap);
+        n = (m < 0) ? n : (n + m > (int)sizeof(line) - 2 ? (int)sizeof(line) - 2 : n + m);
+        line[n++] = '\n';
+        ps4LogWrite(line, (size_t)n);
+        return;
+    }
+#endif
     fprintf(stderr, "[%s] ", tags[level]);
     va_start(ap, fmt);
     vfprintf(stderr, fmt, ap);
@@ -100,6 +116,19 @@ void sysLogPrintf(enum LogLevel level, const char *fmt, ...)
 void sysFatalError(const char *fmt, ...)
 {
     va_list ap;
+#if defined(PLATFORM_PS4)
+    {
+        char line[1024];
+        int n = snprintf(line, sizeof(line), "[FATAL] ");
+        va_start(ap, fmt);
+        int m = vsnprintf(line + n, sizeof(line) - n - 1, fmt, ap);
+        va_end(ap);
+        n = (m < 0) ? n : (n + m > (int)sizeof(line) - 2 ? (int)sizeof(line) - 2 : n + m);
+        line[n++] = '\n';
+        ps4LogWrite(line, (size_t)n);
+        abort();   /* klog gets the crash report */
+    }
+#endif
     fflush(stdout);
     fflush(stderr);
     fprintf(stderr, "[FATAL] ");
@@ -148,6 +177,8 @@ int sysRelaunchSelf(void)
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
     return 0;
+#elif defined(PLATFORM_PS4)
+    return -1;   /* no fork/exec for apps */
 #else
     if (!g_argv || g_argc <= 0) return -1;
     char exe[4096];
@@ -243,6 +274,8 @@ const char *sysGetExeDir(void)
                 *slash = 0;
         }
     }
+#elif defined(PLATFORM_PS4)
+    return PS4_DATA_DIR;
 #endif
     return exeDir;
 }
@@ -273,6 +306,17 @@ const char *sysResolvePath(const char *path)
     }
 #endif
 
+#if defined(PLATFORM_PS4)
+    /* Fixed folders (no CWD for apps): $E = PS4_DATA_DIR, $S = its data/. */
+    if (!strncmp(path, "$E/", 3)) {
+        snprintf(out, sizeof(out), PS4_DATA_DIR "/%s", path + 3);
+        return out;
+    }
+    if (!strncmp(path, "$S/", 3)) {
+        snprintf(out, sizeof(out), PS4_DATA_DIR "/data/%s", path + 3);
+        return out;
+    }
+#endif
     if (!strncmp(path, "$E/", 3)) {
 #if defined(PLATFORM_WINDOWS)
         snprintf(out, sizeof(out), "%s\\%s", exedir, path + 3);

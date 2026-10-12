@@ -1589,7 +1589,9 @@ int inputInit(void)
             /* Feed the raw device delta straight through: no OS pointer
              * acceleration, no warp-based emulation. Must be set before
              * relative mode is enabled. */
+#ifdef SDL_HINT_MOUSE_RELATIVE_SYSTEM_SCALE   /* SDL 2.0.20+ (the PS4's is 2.0.18) */
             SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_SYSTEM_SCALE, "0");
+#endif
             SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_MODE_WARP, "0");
             sysLogPrintf(LOG_INFO, "input: raw mouse input (no OS pointer accel)");
         }

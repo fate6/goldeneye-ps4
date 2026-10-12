@@ -38,6 +38,9 @@ extern int snprintf(char *str, size_t maxsize, const char *format, ...);
    * shadow. */
   #include <sys/mman.h>
 #endif
+#if defined(PLATFORM_PS4)
+  #include "../ps4/ps4_platform.h"
+#endif
 
 #include "system.h"
 #include "fs.h"
@@ -407,6 +410,17 @@ int romdataInit(void)
                 free(img);
                 return -1;
             }
+#elif defined(PLATFORM_PS4)
+            /* PS4: the runtime's mmap wrapper moves large anonymous maps;
+             * ps4MapFixed maps exactly here (only over a free range). Like
+             * Windows, no heap-copy fallback: the game needs the cart map. */
+            if (ps4MapFixed(CART_BASE, maplen, -1)) {
+                mappedLen = maplen;
+                return romdataFinishCartMap(tok, img, sideTotal, cgTotal);
+            }
+            sysLogPrintf(LOG_ERROR, "romdataInit: could not map the ROM at 0x%08X", CART_BASE);
+            free(img);
+            return -1;
 #else
             /* POSIX: anonymous fixed-address mmap. MAP_FIXED_NOREPLACE (Linux
              * 4.17+) fails instead of clobbering an existing mapping; where it

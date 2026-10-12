@@ -514,7 +514,20 @@ void crashDumpThreads(const unsigned long *tids, const char **names, int count)
     }
 }
 
-#endif /* PLATFORM_WINDOWS / PLATFORM_LINUX */
+#elif defined(PLATFORM_PS4)
+
+/* PS4: crashes are reported by the console (klog) and DolphinPS4's runtime
+ * crash log; per-thread stack dumps are not available here. */
+void crashDumpThreads(const unsigned long *tids, const char **names, int count)
+{
+    (void)tids;
+    for (int i = 0; i < count; i++) {
+        sysLogPrintf(LOG_WARNING, "heartbeat: thread %s stalled (no stack dump on PS4)",
+                     names && names[i] ? names[i] : "?");
+    }
+}
+
+#endif /* PLATFORM_WINDOWS / PLATFORM_LINUX / PLATFORM_PS4 */
 
 int g_CrashEnabled = 0;
 

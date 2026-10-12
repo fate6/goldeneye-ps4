@@ -35,6 +35,13 @@
 #include "crash.h"
 #include "thread_config.h"
 #include "game/language.h" /* D295/M-148: JPN glyph-cache types + j_text_trigger */
+#if defined(PLATFORM_PS4)
+#include "../ps4/ps4_platform.h"
+/* An app that returns from main is reported as crashed: halt instead. */
+#define PORT_MAIN_FAIL(why) ps4Halt(why)
+#else
+#define PORT_MAIN_FAIL(why) return 1
+#endif
 
 /* Defined in the game (src/init.c). The port calls into the real game entry. */
 extern void mainproc(void *args);
@@ -125,6 +132,9 @@ void portAllUnlockedApply(void)
 
 int main(int argc, char **argv)
 {
+#if defined(PLATFORM_PS4)
+    ps4PlatformInit(&argc, &argv);   /* log, modules, env.txt, args.txt */
+#endif
     sysSetArgs(argc, argv);
 
     if (sysArgCheck("--version")) { portPrintVersion(); return 0; }
@@ -187,7 +197,7 @@ int main(int argc, char **argv)
         sysLogPrintf(LOG_ERROR, "Failed to load the ROM (no .z64 in the data/ dir, "
                     "asset conversion failed, or it could not be mapped): "
                     "see the earlier log lines for the cause");
-        return 1;
+        PORT_MAIN_FAIL("ROM not loaded");
     }
 
     /* 2a. Sanity: the image MUST have loaded at its preferred base.
@@ -218,7 +228,7 @@ int main(int argc, char **argv)
     /* 3. Video / audio / input. */
     if (videoInit() != 0) {
         sysLogPrintf(LOG_ERROR, "videoInit failed");
-        return 1;
+        PORT_MAIN_FAIL("videoInit failed");
     }
     audioInit();
     mixerInit();
