@@ -3,9 +3,10 @@
 // a separate module keeps the eboot small, see there), and presentation
 // through VideoOut, as in the x360
 // port's VulkanPresenter (and DolphinPS4's swap chain):
-//  - three linear R8G8B8A8 1920x1080 images in host-visible device-local
-//    memory at 2 MiB alignment, registered as VideoOut buffers (GPU address =
-//    CPU address on the PS4);
+//  - three linear R8G8B8A8 images at the output resolution (3840x2160 when
+//    the system outputs 2160p, a PS4 Pro on a 4K TV; else 1920x1080) in
+//    host-visible device-local memory at 2 MiB alignment, registered as
+//    VideoOut buffers (GPU address = CPU address on the PS4);
 //  - each frame blits into the next image once it is off screen (flip status
 //    wait), then queues a GPU-side flip behind the frame's work
 //    (ac_ps4_submit_flip); a CPU flip after the GPU finishes is the fallback.
@@ -46,11 +47,11 @@ extern "C" int gfx_ps4_vsync_paced;
 namespace {
 
 constexpr uint32_t kImages = 3;
-constexpr uint32_t kWidth = 1920, kHeight = 1080;
 constexpr VkDeviceSize kAlign = VkDeviceSize(2) << 20;   // VideoOut buffers: 2 MiB aligned
 
 struct VideoOut {
     int video = -1;
+    uint32_t width = 1920, height = 1080;
     OrbisKernelEqueue flip_queue = 0;
     VkImage images[kImages] = {};
     VkDevice device = VK_NULL_HANDLE;
@@ -61,34 +62,31 @@ struct VideoOut {
 };
 VideoOut out;
 
-bool ps4_init(VkInstance instance, VkPhysicalDevice physical, VkDevice device,
-              PFN_vkGetDeviceProcAddr gdpa, uint32_t queue_family) {
-    (void)queue_family;
+// Create the presentation images at w x h and register them with VideoOut.
+// On failure everything created here is released again.
+bool create_buffers(VkInstance instance, VkPhysicalDevice physical, VkDevice device,
+                    PFN_vkGetDeviceProcAddr gdpa, int video, uint32_t kWidth, uint32_t kHeight) {
     auto gipa = vk_icdGetInstanceProcAddr;
     auto getMemProps = (PFN_vkGetPhysicalDeviceMemoryProperties)gipa(instance, "vkGetPhysicalDeviceMemoryProperties");
     auto createImage = (PFN_vkCreateImage)gdpa(device, "vkCreateImage");
+    auto destroyImage = (PFN_vkDestroyImage)gdpa(device, "vkDestroyImage");
     auto getReqs = (PFN_vkGetImageMemoryRequirements)gdpa(device, "vkGetImageMemoryRequirements");
     auto allocate = (PFN_vkAllocateMemory)gdpa(device, "vkAllocateMemory");
+    auto freeMemory = (PFN_vkFreeMemory)gdpa(device, "vkFreeMemory");
     auto mapMemory = (PFN_vkMapMemory)gdpa(device, "vkMapMemory");
     auto bindImage = (PFN_vkBindImageMemory)gdpa(device, "vkBindImageMemory");
     auto getLayout = (PFN_vkGetImageSubresourceLayout)gdpa(device, "vkGetImageSubresourceLayout");
     VkPhysicalDeviceMemoryProperties mp;
     getMemProps(physical, &mp);
-    out.device = device;
-    out.wait_idle = (PFN_vkDeviceWaitIdle)gdpa(device, "vkDeviceWaitIdle");
-
-    sceUserServiceInitialize(nullptr);   // already initialized is fine
-    const int video = sceVideoOutOpen(0xFF, 0, 0, nullptr);
-    if (video < 0) {
-        sysLogPrintf(LOG_ERROR, "ps4: sceVideoOutOpen failed: %#x", (unsigned)video);
+    VkDeviceMemory mems[kImages] = {};
+    auto release = [&]() {
+        for (uint32_t i = 0; i < kImages; i++) {
+            if (out.images[i]) destroyImage(device, out.images[i], nullptr);
+            if (mems[i]) freeMemory(device, mems[i], nullptr);
+            out.images[i] = VK_NULL_HANDLE;
+        }
         return false;
-    }
-    {
-        OrbisVideoOutResolutionStatus rs = {};
-        const int r = sceVideoOutGetResolutionStatus(video, &rs);
-        sysLogPrintf(LOG_INFO, "ps4: video output %ux%u (pane %ux%u, flags %#x) = %#x", rs.width,
-                     rs.height, rs.paneWidth, rs.paneHeight, (unsigned)rs.flags, (unsigned)r);
-    }
+    };
     void *addresses[kImages] = {};
     uint32_t pitch_pixels = kWidth;
     for (uint32_t i = 0; i < kImages; i++) {
@@ -104,7 +102,8 @@ bool ps4_init(VkInstance instance, VkPhysicalDevice physical, VkDevice device,
         ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         if (createImage(device, &ci, nullptr, &out.images[i]) != VK_SUCCESS) {
             sysLogPrintf(LOG_ERROR, "ps4: VideoOut image %u: vkCreateImage failed", i);
-            return false;
+            out.images[i] = VK_NULL_HANDLE;
+            return release();
         }
         VkMemoryRequirements req;
         getReqs(device, out.images[i], &req);
@@ -119,27 +118,28 @@ bool ps4_init(VkInstance instance, VkPhysicalDevice physical, VkDevice device,
         }
         if (type == UINT32_MAX) {
             sysLogPrintf(LOG_ERROR, "ps4: no host-visible device memory for VideoOut images");
-            return false;
+            return release();
         }
         // Over-allocate to bind at a 2 MiB aligned address.
         VkMemoryAllocateInfo ai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
         ai.allocationSize = req.size + kAlign;
         ai.memoryTypeIndex = type;
-        VkDeviceMemory mem;
+        VkDeviceMemory &mem = mems[i];
         if (allocate(device, &ai, nullptr, &mem) != VK_SUCCESS) {
             sysLogPrintf(LOG_ERROR, "ps4: VideoOut image memory allocation failed");
-            return false;
+            mem = VK_NULL_HANDLE;
+            return release();
         }
         uint8_t *mapping = nullptr;
         if (mapMemory(device, mem, 0, VK_WHOLE_SIZE, 0, (void **)&mapping) != VK_SUCCESS) {
             sysLogPrintf(LOG_ERROR, "ps4: VideoOut image memory map failed");
-            return false;
+            return release();
         }
         VkDeviceSize offset = ((uintptr_t)mapping + kAlign - 1) / kAlign * kAlign - (uintptr_t)mapping;
         offset = (offset + req.alignment - 1) / req.alignment * req.alignment;
         if (bindImage(device, out.images[i], mem, offset) != VK_SUCCESS) {
             sysLogPrintf(LOG_ERROR, "ps4: VideoOut image bind failed");
-            return false;
+            return release();
         }
         VkImageSubresource sub = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0};
         VkSubresourceLayout layout;
@@ -156,7 +156,35 @@ bool ps4_init(VkInstance instance, VkPhysicalDevice physical, VkDevice device,
     const int reg = sceVideoOutRegisterBuffers(video, 0, addresses, (int32_t)kImages, &attr);
     sysLogPrintf(LOG_INFO, "ps4: VideoOut %d %ux%u pitch %u, register buffers = %#x", video, kWidth, kHeight,
                  pitch_pixels, (unsigned)reg);
-    if (reg < 0) return false;
+    if (reg < 0) return release();
+    out.width = kWidth;
+    out.height = kHeight;
+    return true;
+}
+
+bool ps4_init(VkInstance instance, VkPhysicalDevice physical, VkDevice device,
+              PFN_vkGetDeviceProcAddr gdpa, uint32_t queue_family) {
+    (void)queue_family;
+    out.device = device;
+    out.wait_idle = (PFN_vkDeviceWaitIdle)gdpa(device, "vkDeviceWaitIdle");
+
+    sceUserServiceInitialize(nullptr);   // already initialized is fine
+    const int video = sceVideoOutOpen(0xFF, 0, 0, nullptr);
+    if (video < 0) {
+        sysLogPrintf(LOG_ERROR, "ps4: sceVideoOutOpen failed: %#x", (unsigned)video);
+        return false;
+    }
+    OrbisVideoOutResolutionStatus rs = {};
+    const int r = sceVideoOutGetResolutionStatus(video, &rs);
+    sysLogPrintf(LOG_INFO, "ps4: video output %ux%u (pane %ux%u, flags %#x) = %#x", rs.width, rs.height,
+                 rs.paneWidth, rs.paneHeight, (unsigned)rs.flags, (unsigned)r);
+    // 4K buffers on a 2160p output; 1080p ones (scaled up by the system) when
+    // that is not possible.
+    const bool uhd = r >= 0 && rs.width >= 3840 && rs.height >= 2160;
+    if (!(uhd && create_buffers(instance, physical, device, gdpa, video, 3840, 2160)) &&
+        !create_buffers(instance, physical, device, gdpa, video, 1920, 1080)) {
+        return false;
+    }
     sceKernelCreateEqueue(&out.flip_queue, "ge64 flip");
     sceVideoOutAddFlipEvent(out.flip_queue, video, nullptr);
     out.video = video;
@@ -180,8 +208,8 @@ VkImage ps4_acquire(uint32_t *w, uint32_t *h) {
         }
     }
     out.acquired = (uint32_t)(out.flips_submitted % kImages);
-    *w = kWidth;
-    *h = kHeight;
+    *w = out.width;
+    *h = out.height;
     return out.images[out.acquired];
 }
 
