@@ -302,10 +302,12 @@ static struct Row rows[] = {
      * with the mouse fed through the game's integrator at PD's mouse damp --
      * the default. CENTRED (PC) = opt-in FPS-style aim (#104), not N64.
      * Device-neutral (D404): applies to every aim input. */
+#ifndef PLATFORM_PS4   /* PS4: on the Controller page (no Mouse page) */
     { .key="Input.AimMode", .label="Aim style", .kind=ROW_ENUM, .step=1, .names=kAimMode },
     /* D338: how far the N64-style crosshair travels. Hidden while the aim
      * style is CENTRED (PC), where the crosshair doesn't travel. */
     { .key="Input.AimRange", .label="Aim range", .kind=ROW_ENUM, .step=1, .names=kAimRange, .hiddenIfOn="Input.AimMode" },
+#endif
     /* Existing ini-only keys exposed by the PD-parity regroup (rows only; input.c
      * already reads them). */
     { .key="Input.CrosshairCursor", .label="Crosshair pointer", .kind=ROW_TOGGLE, .step=1, .names=kOnOff },
@@ -351,6 +353,10 @@ static struct Row rows[] = {
     { .key="Input.PadTriggerPct", .label="Trigger threshold", .kind=ROW_SLIDER, .step=1, .unit="%" },   /* D506: raw is already a percent */
     /* D401 item 3: one global Rumble Pak strength (0 = silent, 1 = full, dflt 0.5). */
     { .key="Input.RumbleScale", .label="Vibration", .kind=ROW_SLIDER, .step=0.05 },
+#ifdef PLATFORM_PS4
+    { .key="Input.AimMode", .label="Aim style", .kind=ROW_ENUM, .step=1, .names=kAimMode },
+    { .key="Input.AimRange", .label="Aim range", .kind=ROW_ENUM, .step=1, .names=kAimRange, .hiddenIfOn="Input.AimMode" },
+#endif
     { .key="__ResetController", .label="Reset to defaults", .kind=ROW_ACTION },
     SEP_BACK(Controller),
 
@@ -427,6 +433,9 @@ static struct Row rows[] = {
     /* D216/Game.SkipIntro: D408 -- with it on, a failed/aborted
      * mission skips the post-mission failure dossier (MENU_MISSION_FAILED). */
     { .key="Game.SkipIntro", .label="Skip intro", .kind=ROW_TOGGLE, .step=1, .names=kOnOff },
+#ifdef PLATFORM_PS4
+    { .key="Game.AutoPause", .label="Pause on PS button", .kind=ROW_TOGGLE, .step=1, .names=kOnOff },
+#endif
     /* D257: everything-unlocked goodie. D442: a pure query-time/RAM override
      * (file2.c fileGetIsCheatUnlocked + fileIsStageUnlockedAtDifficulty, plus
      * the debug flags set by portAllUnlockedApply in main.c); no save bytes are
@@ -455,8 +464,29 @@ static struct Row rows[] = {
 /* Hub / tab order (PD's Extended hub: Video, Audio, Mouse, Controller, Game,
  * Key Bindings). Differs from the physical order so the hub rows stay with Game. */
 static const char *const kRootOrder[] = {
+#ifdef PLATFORM_PS4
+    "__HdrVideo", "__HdrAudio", "__HdrSelPlayerC", "__HdrGame",   /* no mouse or keyboard */
+#else
     "__HdrVideo", "__HdrAudio", "__HdrMouse", "__HdrSelPlayerC", "__HdrGame", "__HdrBindings",
+#endif
 };
+
+#ifdef PLATFORM_PS4
+/* Rows with no effect on a PS4: window/display-mode and frame pacing (the
+ * VideoOut flip sets those), the audio device, the update check and the quit /
+ * relaunch actions (an app that exits by itself is reported as a crash). */
+static int ps4RowHidden(const struct Row *r)
+{
+    static const char *const kHidden[] = {
+        "Video.Fullscreen", "Video.FullscreenMode", "__CenterWindow", "__Resolution",
+        "Video.VSync", "Video.FpsCap", "Audio.Device", "Game.CheckUpdates", "__UpdateOpen",
+        "__SepHub", "__QuitToDesktop", "__RestartGame",
+    };
+    for (size_t k = 0; k < sizeof(kHidden) / sizeof(kHidden[0]); k++)
+        if (!strcmp(r->key, kHidden[k])) return 1;
+    return 0;
+}
+#endif
 #define NUM_ROOTS ((int)(sizeof(kRootOrder) / sizeof(kRootOrder[0])))
 #define NUM_ROWS ((int)(sizeof(rows) / sizeof(rows[0])))
 
@@ -1042,7 +1072,7 @@ static void overlayUpdateVisible(void)
         for (int k = 0; k < NUM_ROOTS; k++)
             s_visIdx[s_visN++] = optionsRootHeader(k);
         for (int i = 0; i < NUM_ROWS; i++)
-            if (rows[i].hub) s_visIdx[s_visN++] = i;
+            if (rows[i].hub && rowSchemeOk(&rows[i])) s_visIdx[s_visN++] = i;
     }
     if (s_visN == 0) {   /* cannot happen (toggles have no hide source) */
         s_visIdx[s_visN++] = 0;
@@ -1422,6 +1452,9 @@ static void overlayInit(void)
 /* D516: scheme-conditional rows (see Row.schemeOnly). */
 static int rowSchemeOk(const struct Row *r)
 {
+#ifdef PLATFORM_PS4
+    if (ps4RowHidden(r)) return 0;
+#endif
     if (!strcmp(r->key, "__UpdateOpen")) return updateCheckAvailable() != NULL;   /* D551 */
     if (!r->schemeOnly || !r->schemePtr) return 1;
     return (*r->schemePtr != 0) == (r->schemeOnly == 2);
@@ -2047,6 +2080,9 @@ static const struct { const char *key; double def; } kResetDefaults[] = {
     { "Video.CrosshairHealthColor", 0 },   /* = 0 (off, D511) */
     /* GAMEPLAY ini rows (port/src/video.c initializers) */
     { "Game.SkipIntro",   0 },   /* = 0 */
+#ifdef PLATFORM_PS4
+    { "Game.AutoPause",   1 },   /* = 1 (input.c) */
+#endif
     { "Game.CheckUpdates", 0 },  /* = 0 (off, D551) */
     { "Game.NoHitFlash",  0 },   /* = 0 */
     { "Game.AllUnlocked", 0 },   /* = 0 -- D257's "default ON" note was stale */
@@ -3339,6 +3375,19 @@ static int tipWrap(const char *tip, s32 av, char *l1, size_t n1, char *l2, size_
  * placeholders stay; hintFit() also falls back to Xbox letters as a last resort. */
 struct HintLine { const char *full, *compact; };
 static const struct HintLine kHint[] = {
+#ifdef PLATFORM_PS4   /* pad only: no Enter / Esc / F10 (the touchpad is {BACK}) */
+    /*  0 */ { "Press a pad button, or hold {B} to bind {B}", "Press a button   Hold {B}: Bind {B}" },
+    /*  1 */ { "Tap {B}: Cancel   Hold {BACK}: Clear",        "Tap {B}: Cancel   Hold {BACK}: Clear" },
+    /*  2 */ { "Press a key or mouse button (1-5)",           "Press key or mouse 1-5" },
+    /*  3 */ { "{B}: Cancel",                                 "{B}: Cancel" },
+    /*  4 */ { "{A}: Select",                                 "{A}: Select" },
+    /*  5 */ { "{B}/{BACK}: Close",                           "{B}/{BACK}: Close" },
+    /*  6 */ { "{A}: Bind   Left/Right: Slot   {Y}: Clear",   "{A}: Bind   L/R: Slot   {Y}: Clear" },
+    /*  7 */ { "{B}: Back   {BACK}: Close",                   "{B}: Back   {BACK}: Close" },
+    /*  8 */ { "Keyboard and mouse only   Left/Right: Slot",  "Keys/mouse only   L/R: Slot" },
+    /*  9 */ { "{B}: Back",                                   "{B}: Back" },
+    /* 10 */ { "{A}: Select   Left/Right: Change",            "{A}: Select   L/R: Change" },
+#else
     /*  0 */ { "Press a pad button, or hold {B} to bind {B}", "Press a button   Hold {B}: Bind {B}" },
     /*  1 */ { "Tap {B}/Esc: Cancel   Hold {BACK}: Clear",    "Tap {B}: Cancel   Hold {BACK}: Clear" },
     /*  2 */ { "Press a key or mouse button (1-5)",           "Press key or mouse 1-5" },
@@ -3350,6 +3399,7 @@ static const struct HintLine kHint[] = {
     /*  8 */ { "Keyboard and mouse only   Left/Right: Slot",  "Keys/mouse only   L/R: Slot" },
     /*  9 */ { "Enter: Bind   {B}/Esc: Back",                 "Enter: Bind   {B}: Back" },
     /* 10 */ { "{A}/Enter: Select   Left/Right: Change",      "{A}: Select   L/R: Change" },
+#endif
 };
 enum { H_PADCAP1, H_PADCAP2, H_KEYCAP1, H_KEYCAP2, H_HUB1, H_HUB2, H_CTRL1, H_BACK, H_BIND1, H_BIND2, H_SEC1 };
 static void tipSelfCheck(void);
@@ -3780,6 +3830,7 @@ static const struct { const char *key, *help; } kRowHelp[] = {
     { "Game.NoHitFlash", "Disables the white flash when you take damage." },
     { "Game.HudScale", "Scales ammo, pickup text, dialogue and this menu." },
     { "Game.SkipIntro", "Skips the intro and opens the file select screen." },
+    { "Game.AutoPause", "Pauses a mission when the PS button menu opens." },
     { "Game.AllUnlocked", "Unlocks all levels, 007 mode and every cheat." },
     { "Game.CheckUpdates", "Notifies you when a new version is available." },
 };

@@ -33,6 +33,10 @@ void *ps4MapFixed(uintptr_t addr, size_t len, int fd);
 /* A thread stack below 2 GiB (the game truncates stack pointers to u32). */
 void *ps4AllocLowStack(size_t size);
 
+/* 1 while the system UI (PS button home screen, quick menu) covers the game.
+ * Polls sceSystemServiceGetStatus at most every 100 ms. */
+int ps4SystemUiOverlaid(void);
+
 /* Never returns: the console reports a crash when an app exits by itself. */
 void ps4Halt(const char *why) __attribute__((noreturn));
 

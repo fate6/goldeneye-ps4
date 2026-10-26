@@ -21,6 +21,7 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 typedef struct {
@@ -39,6 +40,18 @@ typedef struct {
 
 int sceKernelVirtualQuery(const void *addr, int flags, Ps4VQInfo *info, size_t size);
 int sceSysmoduleLoadModuleInternal(uint32_t id);
+
+/* SceSystemServiceStatus (OpenOrbis declares the function without it). */
+typedef struct {
+    int32_t eventNum;
+    uint8_t isSystemUiOverlaid;
+    uint8_t isInBackgroundExecution;
+    uint8_t isCpuMode7CpuNormal;
+    uint8_t isGameLiveStreamingOnAir;
+    uint8_t isOutOfVrPlayArea;
+    uint8_t reserved[125];
+} Ps4SystemServiceStatus;
+int sceSystemServiceGetStatus(Ps4SystemServiceStatus *status);
 
 /* DolphinPS4's runtime wraps mmap (large anonymous maps go to the system
  * flexible pool at an address of its choosing); fixed maps need the real one. */
@@ -116,6 +129,25 @@ void *ps4AllocLowStack(size_t size)
     void *p = ps4MapFixed(next, size, -1);
     if (p) next += size + PS4_PAGE;
     return p;
+}
+
+int ps4SystemUiOverlaid(void)
+{
+    static uint64_t lastUs;
+    static int overlaid, logged;
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    uint64_t now = (uint64_t)ts.tv_sec * 1000000u + (uint64_t)ts.tv_nsec / 1000u;
+    if (lastUs && now - lastUs < 100000u) return overlaid;
+    lastUs = now;
+    Ps4SystemServiceStatus st;
+    memset(&st, 0, sizeof(st));
+    int r = sceSystemServiceGetStatus(&st);
+    if (r != 0) {
+        if (!logged++) ps4Log("[ps4] sceSystemServiceGetStatus: %#x", (unsigned)r);
+        return overlaid = 0;
+    }
+    return overlaid = st.isSystemUiOverlaid || st.isInBackgroundExecution;
 }
 
 void ps4Halt(const char *why)

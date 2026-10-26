@@ -90,6 +90,9 @@
 #include "language.h"  /* j_text_trigger (control-type mirror) */
 #include "gun.h"  /* native weapon flags + dedicated reload entry points */
 #include "bondinv.h" /* inventory list for the Xbox-style gadget cycle */
+#ifdef PLATFORM_PS4
+#include "../ps4/ps4_platform.h"
+#endif
 
 /* D194 spazz diagnosis: game ticks batched into the current poll (lv.h).
  * Read-only; declared locally to avoid pulling lv.h's wider dependency set. */
@@ -1548,6 +1551,7 @@ static void inputBindingProbe(void);   /* D383/D384; opt-in, restores ini state 
 static int bindsVersion = 0; /* D380/D386: versioned migration of effective ini binds */
 #ifdef PLATFORM_PS4
 static int ps4PadDefaults = 0;   /* 1 once the PC pad defaults were moved to the PS4 ones */
+static int ps4AutoPause = 1;     /* Game.AutoPause: pause when the system UI comes up */
 
 /* PS4: inis written before the L1-crouch defaults carry the PC Aim/Crouch
  * strings in the Custom slots. Move the untouched ones over once. */
@@ -1608,6 +1612,7 @@ int inputInit(void)
     inputMigrateBinds();  /* D380: materialise effective GEPD defaults once */
 #ifdef PLATFORM_PS4
     inputMigratePs4PadDefaults();
+    mouseEnabled = 0;   /* no mouse on the console (the overlay hides the Mouse page) */
 #endif
     inputRebuildBinds();   /* D214: parse [Bind] now that configLoad() has run */
 
@@ -2976,6 +2981,28 @@ static unsigned inputComputePadSlot(int idx, signed char *stick_x, signed char *
         }
     }
 
+#ifdef PLATFORM_PS4
+    /* PS4 auto-pause: the game keeps running behind the system UI (PS button).
+     * When it comes up during solo play, press Start for a few polls so the
+     * game opens its own pause (watch) menu. Never in menus, cutscenes or
+     * split-screen, where Start means something else. */
+    if (idx == 0) {
+        static int wasOverlaid, pulse;
+        int overlaid = ps4SystemUiOverlaid();
+        int menuNow = current_menu != GE_MENU_RUN_STAGE && current_menu != GE_MENU_INVALID;
+        if (overlaid && !wasOverlaid && ps4AutoPause && !inputMpSplit() &&
+            inputCanUseGameplayActions(menuNow)) {
+            pulse = 4;
+            sysLogPrintf(LOG_INFO, "input: system UI up, pausing");
+        }
+        wasOverlaid = overlaid;
+        if (pulse > 0) {
+            pulse--;
+            button |= GE_CONT_START;
+        }
+    }
+#endif
+
     /* D541: front-end release hold-off. One physical press can reach the menu
      * through two OR'd sources a few ms apart -- on a Steam Deck in Desktop
      * Mode, Steam's desktop layout types Enter for A (Escape for B) while SDL
@@ -3142,7 +3169,11 @@ void inputPadHelpFmtFam(char *out, size_t n, const char *tmpl, int fam)
 {
     static const char *const names[3][6] = {
         { "A", "B", "X", "Y", "BACK", "START" },
+#ifdef PLATFORM_PS4
+        { "CROSS", "CIRCLE", "SQUARE", "TRIANGLE", "TOUCHPAD", "OPTIONS" },   /* back = touchpad click */
+#else
         { "CROSS", "CIRCLE", "SQUARE", "TRIANGLE", "SHARE", "OPTIONS" },
+#endif
         { "A", "B", "X", "Y", "MINUS", "PLUS" },
     };
     static const char *const keys[6] = { "{A}", "{B}", "{X}", "{Y}", "{BACK}", "{START}" };
@@ -4013,6 +4044,7 @@ PD_CONSTRUCTOR static void inputConfigInit(void)
     configRegisterInt("Input.BindingsVersion", &bindsVersion, 0, 3);
 #ifdef PLATFORM_PS4
     configRegisterInt("Input.PS4PadDefaults", &ps4PadDefaults, 0, 1);
+    configRegisterInt("Game.AutoPause", &ps4AutoPause, 0, 1);
 #endif
     configRegisterInt("Input.CrouchMode", &crouchMode, 0, 1);
 
