@@ -1613,6 +1613,7 @@ int inputInit(void)
 #ifdef PLATFORM_PS4
     inputMigratePs4PadDefaults();
     mouseEnabled = 0;   /* no mouse on the console (the overlay hides the Mouse page) */
+    mpInputMode = 1;    /* pads only: with one pad, Auto would make the keyboard player 1 */
 #endif
     inputRebuildBinds();   /* D214: parse [Bind] now that configLoad() has run */
 
