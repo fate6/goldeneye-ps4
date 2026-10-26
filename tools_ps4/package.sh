@@ -28,9 +28,21 @@ cp "$eboot" "$stage/"
 cp "$prx" "$stage/sce_module/"   # the Vulkan driver (port/ps4/ps4_vulkan.cpp)
 cp "$ICON" "$stage/sce_sys/icon0.png"
 # Plain homebrew identity: Vulkan through RADV, no Piglet modules bundled.
+# param.sfo ATTRIBUTE bit 23 ("supports NEO mode"): a PS4 Pro runs the game in
+# Neo mode (36 CUs at 911 MHz; the base tiling stays valid, tested on the
+# console). A base PS4 ignores it. GE_PS4_NEO=0 packages without it.
+attribute=0x00800000
+[ "${GE_PS4_NEO:-1}" = 0 ] && attribute=0
+makepkg="$(mktemp)"
+sed -e "s#^    set_entry ATTRIBUTE Integer 4 0\$#    set_entry ATTRIBUTE Integer 4 $attribute#" \
+    "$HOME/DolphinPS4/scripts/make-pkg.sh" > "$makepkg"
+grep -q "set_entry ATTRIBUTE Integer 4 $attribute\$" "$makepkg" \
+  || { echo "make-pkg.sh changed: plain ATTRIBUTE not patched" >&2; exit 1; }
 pkg="$(SFO_STYLE=plain DOLPHIN_PS4_MODULES_DIR=/nonexistent \
-    "$HOME/DolphinPS4/scripts/make-pkg.sh" "$stage" GOLD00064 "GoldenEye 007" "$VERSION" \
+    bash "$makepkg" "$stage" GOLD00064 "GoldenEye 007" "$VERSION" \
     GOLDENEYE64 "$OUT" | tail -1)"
+rm -f "$makepkg"
+echo "param.sfo ATTRIBUTE $attribute"
 echo "package: $pkg"
 if [ "${2:-}" = upload ]; then
     curl -sS --max-time 300 -T "$pkg" "$HOST/data/pkg/"

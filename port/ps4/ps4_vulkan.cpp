@@ -83,6 +83,12 @@ bool ps4_init(VkInstance instance, VkPhysicalDevice physical, VkDevice device,
         sysLogPrintf(LOG_ERROR, "ps4: sceVideoOutOpen failed: %#x", (unsigned)video);
         return false;
     }
+    {
+        OrbisVideoOutResolutionStatus rs = {};
+        const int r = sceVideoOutGetResolutionStatus(video, &rs);
+        sysLogPrintf(LOG_INFO, "ps4: video output %ux%u (pane %ux%u, flags %#x) = %#x", rs.width,
+                     rs.height, rs.paneWidth, rs.paneHeight, (unsigned)rs.flags, (unsigned)r);
+    }
     void *addresses[kImages] = {};
     uint32_t pitch_pixels = kWidth;
     for (uint32_t i = 0; i < kImages; i++) {

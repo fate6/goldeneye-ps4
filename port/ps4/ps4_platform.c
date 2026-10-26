@@ -52,6 +52,7 @@ typedef struct {
     uint8_t reserved[125];
 } Ps4SystemServiceStatus;
 int sceSystemServiceGetStatus(Ps4SystemServiceStatus *status);
+int32_t sceKernelIsNeoMode(void);
 
 /* DolphinPS4's runtime wraps mmap (large anonymous maps go to the system
  * flexible pool at an address of its choosing); fixed maps need the real one. */
@@ -253,6 +254,7 @@ void ps4PlatformInit(int *argc, char ***argv)
     mkdir(PS4_DATA_DIR "/data", 0777);
     s_logFd = open(PS4_DATA_DIR "/ge007.log", O_WRONLY | O_CREAT | O_TRUNC | O_APPEND, 0666);
     ps4Log("[ps4] GoldenEye 007 (N64 decomp PC port) for PS4 starting");
+    ps4Log("[ps4] neo mode %d", (int)sceKernelIsNeoMode());
     ps4RecordImageRange();
     ps4LoadModules();
     ps4ApplyEnvFile();

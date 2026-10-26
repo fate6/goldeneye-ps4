@@ -1,0 +1,50 @@
+--- a/ac_ps4_drm.c
++++ b/ac_ps4_drm.c
+@@ -93,6 +93,21 @@
+ #define PS4_GB_ADDR_CONFIG 0x00011003
+ #define PS4_MC_ARB_RAMCFG 0x2 /* 16 banks */
+ 
++/* GE PS4 Neo: a PS4 Pro runs an app with param.sfo ATTRIBUTE bit 23 in Neo mode (36 CUs at
++ * 911 MHz). The tiling above stays valid there: on the console, Neo mode with these tables
++ * renders correctly, while the 16-pipe P16_32x32_8x16 tables (shadPS4's alternate per-mode
++ * attributes) broke every depth buffer. Only the reported clock changes. */
++int32_t sceKernelIsNeoMode(void);
++
++static bool
++ps4_neo(void)
++{
++   static int neo = -1;
++   if (neo < 0)
++      neo = sceKernelIsNeoMode() == 1;
++   return neo;
++}
++
+ struct amdgpu_bo {
+    uint32_t handle;
+    uint64_t size;
+@@ -928,6 +943,7 @@
+       goto fail;
+    ps4_log("radv/ps4: GPU address windows %#llx (16 GiB), %#llx (32-bit)\n",
+            (unsigned long long)dev->va_start, (unsigned long long)dev->va32_start);
++   ps4_log("radv/ps4: %s mode GPU\n", ps4_neo() ? "Neo (PS4 Pro)" : "base");
+    util_vma_heap_init(&dev->va_heap, dev->va_start, PS4_VA_SIZE);
+    util_vma_heap_init(&dev->va32_heap, dev->va32_start, PS4_VA32_SIZE);
+ 
+@@ -2632,7 +2648,7 @@
+    info->chip_external_rev = 0x14; /* Bonaire range: identified as CHIP_BONAIRE (gfx7) */
+    info->family_id = FAMILY_CI;
+    info->ids_flags = AMDGPU_IDS_FLAGS_FUSION;
+-   info->max_engine_clk = 800000;
++   info->max_engine_clk = ps4_neo() ? 911000 : 800000;
+    info->max_memory_clk = 1375000;
+    info->num_shader_engines = 2;
+    info->num_shader_arrays_per_engine = 1;
+@@ -2660,7 +2676,7 @@
+    d->num_shader_engines = 2;
+    d->num_shader_arrays_per_engine = 1;
+    d->gpu_counter_freq = 100000;
+-   d->max_engine_clock = 800000;
++   d->max_engine_clock = ps4_neo() ? 911000 : 800000;
+    d->max_memory_clock = 1375000;
+    d->cu_active_number = 18;
+    d->cu_bitmap[0][0] = 0x1ff;

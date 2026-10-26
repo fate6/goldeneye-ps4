@@ -5,7 +5,8 @@
 #  - fence waits set errno like the DRM ioctl (else every "not done yet" poll
 #    became VK_ERROR_UNKNOWN);
 #  - geometry-shader rings >= 16 MiB (the system owns the ring size registers;
-#    unused by this renderer, kept so the build matches the tested Mesa).
+#    unused by this renderer, kept so the build matches the tested Mesa);
+#  - PS4 Pro Neo mode detection: clock and log (tools_ps4/mesa-neo.patch).
 # The Mesa source tree is shared with DolphinPS4's build; each run puts the
 # right ac_ps4_drm.c in place, so run DolphinPS4's build-mesa.sh again before
 # DolphinPS4 work.
@@ -33,6 +34,10 @@ perl -0pi -e '
 ' "$MESA/src/amd/common/ac_ps4_drm.c"
 [ "$(grep -c 'errno = -r;' "$MESA/src/amd/common/ac_ps4_drm.c")" -ge 2 ] \
   || { echo "ac_ps4_drm.c changed: wait errno fix not patched" >&2; exit 1; }
+
+# PS4 Pro Neo mode: detected at run time (sceKernelIsNeoMode); the base tiling stays.
+patch --quiet --forward "$MESA/src/amd/common/ac_ps4_drm.c" < "$(dirname "$0")/mesa-neo.patch" \
+  || { echo "ac_ps4_drm.c changed: mesa-neo.patch does not apply" >&2; exit 1; }
 
 INFO="$MESA/src/amd/vulkan/radv_shader_info.c"
 if ! grep -q "GE PS4 GS ring minimum" "$INFO"; then
