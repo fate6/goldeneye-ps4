@@ -456,10 +456,19 @@ enum { PA_FIRE, PA_AIM, PA_USE, PA_RELOAD, PA_CROUCH, PA_NEXTWPN, PA_PREVWPN,
  * digital source only acts while a stage is playable (facePlayable). */
 static const struct { const char *key; const char *label; const char *def; } kPadAct[PA_COUNT] = {
     [PA_FIRE]    = { "Fire",       "Fire",             "righttrigger" },
+#ifdef PLATFORM_PS4
+    /* PS4: L1 crouches (stick clicks wear the sticks); aim stays on L2. */
+    [PA_AIM]     = { "Aim",        "Aim",              "lefttrigger" },
+#else
     [PA_AIM]     = { "Aim",        "Aim",              "lefttrigger,leftshoulder" },
+#endif
     [PA_USE]     = { "Use",        "Use / action",     "a" },
     [PA_RELOAD]  = { "Reload",     "Reload",           "x" },
+#ifdef PLATFORM_PS4
+    [PA_CROUCH]  = { "Crouch",     "Crouch",           "leftshoulder,leftstick" },
+#else
     [PA_CROUCH]  = { "Crouch",     "Crouch",           "leftstick,rightstick" },
+#endif
     [PA_NEXTWPN] = { "NextWeapon", "Next weapon",      "y" },
     [PA_PREVWPN] = { "PrevWeapon", "Previous weapon",  "none" },
     [PA_GADGET]  = { "Gadget",     "Cycle gadget",     "b" },
