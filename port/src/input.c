@@ -479,7 +479,7 @@ static int controlScheme = 0;                    /* D513 Input.ControlScheme: 0 
 static char padStr[MAX_PADS][PA_COUNT][32];      /* Input.Pad[N].<Action> */
 static char padStrKey[MAX_PADS][PA_COUNT][40];
 static PadTable padTabBuf[2];
-static SDL_atomic_t padTabPub;                   /* published PadTable* */
+static void *padTabPub;                          /* published PadTable* (a pointer: SDL_atomic_t is only an int) */
 static unsigned padTabSig = 0;
 static int padTabValid = 0;
 
@@ -580,13 +580,13 @@ static const PadTable *padTabGet(void)
         SDL_AtomicLock(&rebuildLock);
         if (padTabValid && padComputeSig() == padTabSig) {   /* another thread just rebuilt */
             SDL_AtomicUnlock(&rebuildLock);
-            return (const PadTable *)SDL_AtomicGetPtr((void **)&padTabPub);
+            return (const PadTable *)SDL_AtomicGetPtr(&padTabPub);
         }
-        PadTable *cur = (PadTable *)SDL_AtomicGetPtr((void **)&padTabPub);
+        PadTable *cur = (PadTable *)SDL_AtomicGetPtr(&padTabPub);
         PadTable *spare = (cur == &padTabBuf[0]) ? &padTabBuf[1] : &padTabBuf[0];
         int bad = 0;
         for (int s = 0; s < MAX_PADS; s++) padBuildBinds(&spare->seat[s], s, padPresetCustom(s), &bad);
-        SDL_AtomicSetPtr((void **)&padTabPub, spare);
+        SDL_AtomicSetPtr(&padTabPub, spare);
         padTabSig = sig;
         padTabValid = 1;
         sysLogPrintf(LOG_INFO, "input: pad table rebuilt (presets %d/%d/%d/%d%s, %d unknown name(s))",
@@ -595,7 +595,7 @@ static const PadTable *padTabGet(void)
         SDL_AtomicUnlock(&rebuildLock);
         return spare;
     }
-    return (const PadTable *)SDL_AtomicGetPtr((void **)&padTabPub);
+    return (const PadTable *)SDL_AtomicGetPtr(&padTabPub);
 }
 
 /* Current raw source state of a pad (digital buttons + triggers). */
