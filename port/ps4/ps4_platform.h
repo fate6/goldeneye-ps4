@@ -37,6 +37,9 @@ void *ps4AllocLowStack(size_t size);
  * Polls sceSystemServiceGetStatus at most every 100 ms. */
 int ps4SystemUiOverlaid(void);
 
+/* 1 on a PS4 Pro running the game in Neo mode (the full GPU). */
+int ps4IsNeoMode(void);
+
 /* Never returns: the console reports a crash when an app exits by itself. */
 void ps4Halt(const char *why) __attribute__((noreturn));
 

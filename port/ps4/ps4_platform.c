@@ -132,6 +132,11 @@ void *ps4AllocLowStack(size_t size)
     return p;
 }
 
+int ps4IsNeoMode(void)
+{
+    return sceKernelIsNeoMode() == 1;
+}
+
 int ps4SystemUiOverlaid(void)
 {
     static uint64_t lastUs;

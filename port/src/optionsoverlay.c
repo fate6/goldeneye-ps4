@@ -53,6 +53,9 @@ extern MENU current_menu;
 #include "video.h"
 #include "input.h"
 #include "front.h"   /* selected_folder_num (D356 stage probe) */
+#ifdef PLATFORM_PS4
+#include "../ps4/ps4_platform.h"   /* ps4IsNeoMode: render resolution default */
+#endif
 #include "bondtypes.h"   /* sImageTableEntry (D555 crosshair pointer: typed field reads) */
 #include "file.h"   /* save_data (D356 reset probe: second-file isolation) */
 #include "optionsoverlay.h"
@@ -106,6 +109,9 @@ enum { ROW_TOGGLE, ROW_SLIDER, ROW_ENUM, ROW_MSAA, ROW_RES, ROW_ACTION, ROW_FPSC
  * On/Off, no all-caps value strings. Display-only; config stores 0/1 either way. */
 static const char *const kOnOff[]     = { "Off", "On", NULL };
 static const char *const kHold[]      = { "Hold", "Toggle", NULL };
+#ifdef PLATFORM_PS4
+static const char *const kRenderRes[] = { "1080p", "1440p", "2160p", NULL };   /* Video.RenderResolution */
+#endif
 static const char *const kAspectMode[] = { "Fill window", "Original", "16:9", "21:9", NULL };   /* D447: Original = 4:3 (16:9 with the game Ratio) bars; D508: 2..3 force a ratio */
 static const char *const kTexFilter[] = { "Nearest", "Bilinear", "3-point", "Trilinear", NULL };   /* Trilinear option (playtest 2026-10-03) */
 static const char *const kPadPreset[] = { "1.1 Jinx", "1.2 Christmas", "1.3 Frost", "Custom", "1.4 Elektra", NULL };   /* D498: index = stored value; inputPadPresetStep gives the display order */
@@ -250,6 +256,9 @@ static struct Row rows[] = {
      * vertical-FOV compensation). */
     { .key="Video.NativeWidescreen", .label="Native widescreen", .kind=ROW_TOGGLE, .step=1, .names=kOnOff },
     { .key="Video.WidescreenAuto", .label="Widescreen auto FOV", .kind=ROW_TOGGLE, .step=1, .names=kOnOff },
+#ifdef PLATFORM_PS4
+    { .key="Video.RenderResolution", .label="Render resolution", .kind=ROW_ENUM, .step=1, .names=kRenderRes },
+#endif
     { .key="Video.MSAA", .label="Anti-aliasing", .kind=ROW_MSAA, .restart=1 },
     SEP(V2),
     { .key="Video.VSync", .label="VSync", .kind=ROW_TOGGLE, .step=1, .names=kOnOff },
@@ -2058,6 +2067,9 @@ static const struct { const char *key; double def; } kResetDefaults[] = {
     { "Input.PadPreset",         0 },   /* = 0 (Jinx 1.1), D469 */
     /* GRAPHICS (port/src/video.c initializers) */
     { "Video.MSAA",                 2 },   /* = 2 */
+#ifdef PLATFORM_PS4
+    { "Video.RenderResolution",     0 },   /* = 1440p in Neo mode, else 1080p (kResetDefault) */
+#endif
     { "Video.TextureFilter",        1 },   /* = 1 (bilinear) */
     { "Video.Anisotropy",           4 },   /* = 4 */
     { "Video.FovScale",            100 },  /* = 100 */
@@ -2100,6 +2112,9 @@ static const struct { const char *key; double def; } kResetDefaults[] = {
 
 static double kResetDefault(const char *key)
 {
+#ifdef PLATFORM_PS4
+    if (strcmp(key, "Video.RenderResolution") == 0) return ps4IsNeoMode() ? 1 : 0;   /* as video.c */
+#endif
     for (size_t i = 0; i < sizeof(kResetDefaults) / sizeof(kResetDefaults[0]); i++)
         if (strcmp(kResetDefaults[i].key, key) == 0) return kResetDefaults[i].def;
     return -1.0;
@@ -3831,6 +3846,7 @@ static const struct { const char *key, *help; } kRowHelp[] = {
     { "Game.HudScale", "Scales ammo, pickup text, dialogue and this menu." },
     { "Game.SkipIntro", "Skips the intro and opens the file select screen." },
     { "Game.AutoPause", "Pauses a mission when the PS button menu opens." },
+    { "Video.RenderResolution", "Draws the game sharper, then scales it to the screen. 2160p can slow down." },
     { "Game.AllUnlocked", "Unlocks all levels, 007 mode and every cheat." },
     { "Game.CheckUpdates", "Notifies you when a new version is available." },
 };

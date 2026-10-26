@@ -237,6 +237,7 @@ struct State {
     std::unordered_map<uint32_t, Texture> textures;
     uint32_t next_texture = 1;
     Image white;
+    Image present_scaled;   // linear presentation of a frame of another size (vk_end_frame)
     Bound bound[2];
     bool linear_filter[2] = {false, false};
     int active_unit = 0;
@@ -1264,8 +1265,28 @@ static void vk_end_frame(void) {
             vkCmdBlitImage(f.draw, src.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, present,
                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit,
                            same_size ? VK_FILTER_NEAREST : VK_FILTER_LINEAR);
-        } else if (same_size) {
-            // No blits into linear images: one copy region per row, flipped.
+        } else {
+            // No blits into linear images: one copy region per row, flipped. A frame
+            // rendered at another size (PS4 render resolution) is first scaled into a
+            // presentation-sized optimal image.
+            VkImage rows_src = src.image;
+            if (!same_size) {
+                Image &mid = g.present_scaled;
+                if (!mid.image) {
+                    mid = create_image(pw, ph, 1, kColorFormat, VK_SAMPLE_COUNT_1_BIT,
+                                       VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                                       false);
+                }
+                barrier(f.draw, mid, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+                VkImageBlit blit = {};
+                blit.srcSubresource = blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+                blit.srcOffsets[1] = {(int32_t)src.width, (int32_t)src.height, 1};
+                blit.dstOffsets[1] = {(int32_t)pw, (int32_t)ph, 1};
+                vkCmdBlitImage(f.draw, src.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, mid.image,
+                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
+                barrier(f.draw, mid, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+                rows_src = mid.image;
+            }
             std::vector<VkImageCopy> rows(ph);
             for (uint32_t y = 0; y < ph; y++) {
                 VkImageCopy &c = rows[y];
@@ -1275,7 +1296,7 @@ static void vk_end_frame(void) {
                 c.dstOffset = {0, (int32_t)y, 0};
                 c.extent = {pw, 1, 1};
             }
-            vkCmdCopyImage(f.draw, src.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, present,
+            vkCmdCopyImage(f.draw, rows_src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, present,
                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, ph, rows.data());
         }
         barrier(f.draw, dst, VK_IMAGE_LAYOUT_GENERAL);

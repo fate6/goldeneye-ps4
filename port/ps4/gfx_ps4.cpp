@@ -1,18 +1,27 @@
-// PS4 window-manager backend for fast3d: a fixed 1920x1080 "window" (the TV),
-// frame pacing, and the gfx_sdl_* helpers video.c calls (no GL context here).
-// Presentation (VideoOut flips) is in ps4_vulkan.cpp; swap_buffers paces
-// (unless the flips do) and counts frames.
+// PS4 window-manager backend for fast3d: the TV as a fullscreen "window" at
+// the render resolution, frame pacing, and the gfx_sdl_* helpers video.c calls
+// (no GL context here). Presentation (VideoOut flips, scaled to the 1920x1080
+// output) is in ps4_vulkan.cpp; swap_buffers paces (unless the flips do) and
+// counts frames.
 
 #include <stdint.h>
 #include <time.h>
 
 #include "platform.h"
 #include "system.h"
+#include "ps4_platform.h"
 
 #include "../fast3d/gfx_window_manager_api.h"
 
-#define PS4_SCREEN_W 1920
-#define PS4_SCREEN_H 1080
+// Video.RenderResolution (video.c): 0 1080p, 1 1440p, 2 2160p. Read every
+// frame, so a change applies at once.
+extern "C" int gfx_ps4_render_res = 0;
+static const uint32_t kRenderW[3] = {1920, 2560, 3840};
+static const uint32_t kRenderH[3] = {1080, 1440, 2160};
+
+static int render_res(void) {
+    return gfx_ps4_render_res >= 0 && gfx_ps4_render_res <= 2 ? gfx_ps4_render_res : 0;
+}
 
 extern "C" void (*gfx_pre_swap_hook)(void) = NULL;   // video.c: frame capture
 // Set by ps4_vulkan.cpp: VideoOut flips (vsync) pace the frames, no sleep here.
@@ -29,13 +38,13 @@ static uint64_t now_us(void) {
 }
 
 static void ps4_init(const GfxWindowInitSettings *) {
-    sysLogPrintf(LOG_INFO, "gfx_ps4: %dx%d output", PS4_SCREEN_W, PS4_SCREEN_H);
+    sysLogPrintf(LOG_INFO, "gfx_ps4: render %ux%u", kRenderW[render_res()], kRenderH[render_res()]);
 }
 static void ps4_close(void) {}
 static int ps4_get_display_mode(int modenum, int *w, int *h) {
     if (modenum != 0) return 0;
-    *w = PS4_SCREEN_W;
-    *h = PS4_SCREEN_H;
+    *w = (int)kRenderW[render_res()];
+    *h = (int)kRenderH[render_res()];
     return 1;
 }
 static int ps4_get_current_display_mode(int *w, int *h) { return ps4_get_display_mode(0, w, h); }
@@ -53,8 +62,8 @@ static void ps4_set_cursor_visibility(bool) {}
 static void ps4_set_closest_resolution(int32_t, int32_t, bool) {}
 static void ps4_set_dimensions(uint32_t, uint32_t, int32_t, int32_t) {}
 static void ps4_get_dimensions(uint32_t *w, uint32_t *h, int32_t *x, int32_t *y) {
-    *w = PS4_SCREEN_W;
-    *h = PS4_SCREEN_H;
+    *w = kRenderW[render_res()];
+    *h = kRenderH[render_res()];
     *x = 0;
     *y = 0;
 }
@@ -63,16 +72,26 @@ static void ps4_get_centered_positions(int32_t, int32_t, int32_t *x, int32_t *y)
     *y = 0;
 }
 static void ps4_handle_events(void) {}
-static bool ps4_start_frame(void) { return true; }
+
+static void pace(int fps) {
+    const uint64_t interval = 1000000ull / (uint64_t)fps;
+    uint64_t t = now_us();
+    if (next_frame_us == 0 || t > next_frame_us + interval) next_frame_us = t;
+    if (next_frame_us > t) sysSleep((uint32_t)(next_frame_us - t));
+    next_frame_us += interval;
+}
+
+// While the system UI (PS button) covers the game, draw nothing and leave the
+// GPU to it: the TV keeps the last frame under the menu. No flips then, so
+// pace the dropped frames here to keep the game's rate.
+static bool ps4_start_frame(void) {
+    if (!ps4SystemUiOverlaid()) return true;
+    pace(target_fps > 0 ? target_fps : 60);
+    return false;
+}
 
 static void ps4_swap_buffers_begin(void) {
-    if (target_fps > 0 && !gfx_ps4_vsync_paced) {
-        const uint64_t interval = 1000000ull / (uint64_t)target_fps;
-        uint64_t t = now_us();
-        if (next_frame_us == 0 || t > next_frame_us + interval) next_frame_us = t;
-        if (next_frame_us > t) sysSleep((uint32_t)(next_frame_us - t));
-        next_frame_us += interval;
-    }
+    if (target_fps > 0 && !gfx_ps4_vsync_paced) pace(target_fps);
     if (gfx_pre_swap_hook) gfx_pre_swap_hook();
     frames++;
     const uint64_t t = now_us();

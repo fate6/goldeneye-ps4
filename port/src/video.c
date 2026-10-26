@@ -43,6 +43,8 @@
 extern struct GfxWindowManagerAPI gfx_ps4;
 extern struct GfxRenderingAPI gfx_null_api;
 extern const struct GfxVulkanPlatform *gfx_ps4_vulkan_platform(void);
+extern int gfx_ps4_render_res;   /* Video.RenderResolution: 0 1080p, 1 1440p, 2 2160p */
+#include "../ps4/ps4_platform.h"
 #endif
 
 static struct GfxRenderingAPI *renderingAPI;   /* (defined again below) */
@@ -584,6 +586,11 @@ PD_CONSTRUCTOR static void videoConfigInit(void)
     configRegisterInt("Video.AspectMode", &cfgAspectMode, 0, 3);   /* D447; D508 forced ratios 2..3 */
     configRegisterInt("Video.Fullscreen",    &cfgFullscreen, 0, 1);
     configRegisterInt("Video.FullscreenMode", &cfgFullscreenMode, 0, 1);   /* D511: 0 borderless, 1 exclusive */
+#ifdef PLATFORM_PS4
+    /* 1440p on a PS4 Pro in Neo mode (2160p dips into the 40s in the Dam), 1080p on a base PS4. */
+    gfx_ps4_render_res = ps4IsNeoMode() ? 1 : 0;
+    configRegisterInt("Video.RenderResolution", &gfx_ps4_render_res, 0, 2);   /* gfx_ps4.cpp */
+#endif
     configRegisterInt("Window.Width",        &cfgWinW,       0, 16384);
     configRegisterInt("Window.Height",       &cfgWinH,       0, 16384);
     configRegisterInt("Window.X",            &cfgWinX,      -1, 16384);
