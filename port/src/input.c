@@ -748,6 +748,12 @@ static u8 padFamily[MAX_PADS];
 static void padDetectFamily(int seat)
 {
     padFamily[seat] = PADFAM_XBOX;
+#ifdef PLATFORM_PS4
+    /* PacBrew's PS4 driver builds its GUID from the name, so SDL reports an
+     * unknown type; every pad on the console is a DualShock 4. */
+    padFamily[seat] = PADFAM_PS;
+    return;
+#endif
 #if SDL_VERSION_ATLEAST(2, 0, 12)
     switch (SDL_GameControllerGetType(pads[seat])) {
     case SDL_CONTROLLER_TYPE_PS3:
@@ -1540,6 +1546,26 @@ static void inputMigrateBinds(void);   /* D380; after configLoad */
 static void inputBindingProbe(void);   /* D383/D384; opt-in, restores ini state */
 
 static int bindsVersion = 0; /* D380/D386: versioned migration of effective ini binds */
+#ifdef PLATFORM_PS4
+static int ps4PadDefaults = 0;   /* 1 once the PC pad defaults were moved to the PS4 ones */
+
+/* PS4: inis written before the L1-crouch defaults carry the PC Aim/Crouch
+ * strings in the Custom slots. Move the untouched ones over once. */
+static void inputMigratePs4PadDefaults(void)
+{
+    if (ps4PadDefaults) return;
+    for (int s = 0; s < MAX_PADS; s++) {
+        if (!strcmp(padStr[s][PA_AIM], "lefttrigger,leftshoulder") &&
+            !strcmp(padStr[s][PA_CROUCH], "leftstick,rightstick")) {
+            snprintf(padStr[s][PA_AIM], sizeof(padStr[s][PA_AIM]), "%s", kPadAct[PA_AIM].def);
+            snprintf(padStr[s][PA_CROUCH], sizeof(padStr[s][PA_CROUCH]), "%s", kPadAct[PA_CROUCH].def);
+        }
+    }
+    ps4PadDefaults = 1;
+    configSave();
+    sysLogPrintf(LOG_INFO, "input: moved pad Custom slots to the PS4 defaults (L1 crouch)");
+}
+#endif
 static int crouchMode = 1;   /* 0 = hold, 1 = toggle (latched crouch input); D556: toggle by default (existing ini values kept) */
 
 static void padMapSelfTest(void);
@@ -1566,9 +1592,23 @@ int inputInit(void)
         pads[i] = NULL;
         padInst[i] = -1;
     }
+#ifdef PLATFORM_PS4
+    /* PacBrew's built-in DS4 mapping has start:b6 (the touchpad click) and
+     * back:b4 (Options). Options pauses on a PS4 and the touchpad opens the
+     * options overlay, so swap them. */
+    int mapRc = SDL_GameControllerAddMapping("536f6e79204475616c53686f636b2034,Sony DualShock 4 V2,"
+        "a:b0,b:b1,x:b2,y:b3,back:b6,start:b4,leftstick:b7,rightstick:b8,leftshoulder:b9,"
+        "rightshoulder:b10,dpup:b11,dpdown:b12,dpleft:b13,dpright:b14,leftx:a0,lefty:a1,"
+        "rightx:a2,righty:a3,lefttrigger:a4,righttrigger:a5,");
+    sysLogPrintf(LOG_INFO, "input: DS4 mapping (Options = start, touchpad = back): %d%s%s",
+                 mapRc, mapRc < 0 ? " " : "", mapRc < 0 ? SDL_GetError() : "");
+#endif
     inputOpenPads();
 
     inputMigrateBinds();  /* D380: materialise effective GEPD defaults once */
+#ifdef PLATFORM_PS4
+    inputMigratePs4PadDefaults();
+#endif
     inputRebuildBinds();   /* D214: parse [Bind] now that configLoad() has run */
 
     /* Wave A: one-time per-stick deadzone migration. Old inis carry a single
@@ -3971,6 +4011,9 @@ PD_CONSTRUCTOR static void inputConfigInit(void)
     /* D380: single PC layout. Old Input.Layout is ignored and removed on
      * configSave; BindingsVersion marks the one-time stale-default migration. */
     configRegisterInt("Input.BindingsVersion", &bindsVersion, 0, 3);
+#ifdef PLATFORM_PS4
+    configRegisterInt("Input.PS4PadDefaults", &ps4PadDefaults, 0, 1);
+#endif
     configRegisterInt("Input.CrouchMode", &crouchMode, 0, 1);
 
     /* Seed fresh ini files with the REAL PC binding strings. Older ini
