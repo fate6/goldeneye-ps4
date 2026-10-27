@@ -647,6 +647,15 @@ foreach(variant 11 10 00)
     list(APPEND SRC_VK_SHADERS "${GE_VK_SHADER_OUT}/${_name}.h")
   endforeach()
 endforeach()
+# Presentation into tiled scan-out buffers (PS4 VideoOut above 1080p).
+add_custom_command(
+  OUTPUT "${GE_VK_SHADER_OUT}/gfx_vulkan_tile_comp.h"
+  COMMAND "${CMAKE_COMMAND}" -E make_directory "${GE_VK_SHADER_OUT}"
+  COMMAND "${GLSLANG_VALIDATOR}" -V --target-env vulkan1.3 --vn gfx_vulkan_tile_comp
+          -o "${GE_VK_SHADER_OUT}/gfx_vulkan_tile_comp.h" "${GE_VK_SHADER_DIR}/gfx_vulkan_tile.comp"
+  DEPENDS "${GE_VK_SHADER_DIR}/gfx_vulkan_tile.comp"
+  VERBATIM)
+list(APPEND SRC_VK_SHADERS "${GE_VK_SHADER_OUT}/gfx_vulkan_tile_comp.h")
 include_directories("${GE_VK_SHADER_OUT}")
 
 set(SRC

@@ -1,0 +1,54 @@
+#version 450
+// Presentation into a tiled scan-out buffer (GfxVulkanPlatform.acquire_buffer):
+// the screen image (bottom row first) scaled to the buffer's size and
+// written right way up in the PS4 VideoOut tiled layout for 32-bit pixels,
+// measured on a PS4 Pro (fw 9.00) with a 3840x2160 test pattern
+// (GE_PS4_TILEPAT, docs/PS4-NEO-4K.md):
+//  - 8x8 micro tiles of 256 bytes; 128x128 macro tiles of 64 KiB (16x16
+//    micro tiles), row by row, pitch_tiles to a row;
+//  - micro tile index within a macro tile: XOR of 1, 3, 4, 8 for x bits 0-3
+//    and 129, 66, 44, 48 for y bits 0-3, then XOR (macro x & 7) << 4;
+//  - pixel order within a micro tile: push constant micro (0: x0 x1 y0 x2 y1 y2,
+//    the display order; 1: x0 y0 x1 y1 x2 y2; 2: row by row).
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 0, binding = 0) uniform sampler2D src;
+layout(set = 0, binding = 1, std430) writeonly buffer Dst {
+    uint px[];
+};
+layout(push_constant) uniform Push {
+    uvec2 size;
+    uint pitch_tiles;
+    uint micro;
+} pc;
+
+void main() {
+    uvec2 p = gl_GlobalInvocationID.xy;
+    if (p.x >= pc.size.x || p.y >= pc.size.y) return;
+    vec2 uv = (vec2(p) + 0.5) / vec2(pc.size);
+    uv.y = 1.0 - uv.y;
+    vec4 c = textureLod(src, uv, 0.0);
+
+    uint bx = p.x >> 3, by = p.y >> 3;
+    uint tx = bx >> 4, ty = by >> 4, lx = bx & 15u, ly = by & 15u;
+    uint blk = 256u * (ty * pc.pitch_tiles + tx) ^ ((tx & 7u) << 4);
+    if ((lx & 1u) != 0u) blk ^= 1u;
+    if ((lx & 2u) != 0u) blk ^= 3u;
+    if ((lx & 4u) != 0u) blk ^= 4u;
+    if ((lx & 8u) != 0u) blk ^= 8u;
+    if ((ly & 1u) != 0u) blk ^= 129u;
+    if ((ly & 2u) != 0u) blk ^= 66u;
+    if ((ly & 4u) != 0u) blk ^= 44u;
+    if ((ly & 8u) != 0u) blk ^= 48u;
+
+    uint x = p.x & 7u, y = p.y & 7u, m;
+    if (pc.micro == 0u) {
+        m = (x & 3u) | ((y & 1u) << 2) | ((x & 4u) << 1) | ((y & 6u) << 3);
+    } else if (pc.micro == 1u) {
+        m = (x & 1u) | ((y & 1u) << 1) | ((x & 2u) << 1) | ((y & 2u) << 2) | ((x & 4u) << 2) | ((y & 4u) << 3);
+    } else {
+        m = x | (y << 3);
+    }
+    px[blk * 64u + m] = packUnorm4x8(c);
+}

@@ -67,6 +67,7 @@ static void *ge_vk_aligned_alloc(size_t size, size_t alignment) {
 #include "gfx_vulkan_frag_10.h"
 #include "gfx_vulkan_vert_00.h"
 #include "gfx_vulkan_frag_00.h"
+#include "gfx_vulkan_tile_comp.h"
 
 extern int gfx_rdp_affine;   // gfx_pc.cpp (D540); the backend sets them at init
 extern int gfx_fog_vertex;   // gfx_pc.cpp (D543)
@@ -90,7 +91,7 @@ extern int gfx_fog_vertex;   // gfx_pc.cpp (D543)
     X(vkCreateImageView) X(vkDestroyImageView) X(vkCreateSampler)              \
     X(vkCreateShaderModule) X(vkDestroyShaderModule)                           \
     X(vkCreateDescriptorSetLayout) X(vkCreatePipelineLayout)                   \
-    X(vkCreateGraphicsPipelines)                                               \
+    X(vkCreateGraphicsPipelines) X(vkCreateComputePipelines) X(vkCmdDispatch)  \
     X(vkCmdBeginRendering) X(vkCmdEndRendering) X(vkCmdBindPipeline)           \
     X(vkCmdSetViewport) X(vkCmdSetScissor) X(vkCmdSetDepthTestEnable)          \
     X(vkCmdSetDepthWriteEnable) X(vkCmdSetDepthCompareOp)                      \
@@ -238,6 +239,11 @@ struct State {
     uint32_t next_texture = 1;
     Image white;
     Image present_scaled;   // linear presentation of a frame of another size (vk_end_frame)
+    // Presentation into a tiled scan-out buffer (GfxVulkanPlatform.acquire_buffer).
+    VkDescriptorSetLayout tile_set_layout = VK_NULL_HANDLE;
+    VkPipelineLayout tile_layout = VK_NULL_HANDLE;
+    VkPipeline tile_pipeline = VK_NULL_HANDLE;
+    VkSampler tile_sampler = VK_NULL_HANDLE;
     Bound bound[2];
     bool linear_filter[2] = {false, false};
     int active_unit = 0;
@@ -782,6 +788,39 @@ void device_init() {
         sysFatalError("Vulkan: platform presentation setup failed");
     }
 
+    // After the platform init, which picks the presentation.
+    if (g.platform->acquire_buffer) {
+        VkDescriptorSetLayoutBinding tb[2] = {};
+        tb[0] = {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr};
+        tb[1] = {1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr};
+        VkDescriptorSetLayoutCreateInfo tdl = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+        tdl.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
+        tdl.bindingCount = 2;
+        tdl.pBindings = tb;
+        vk_check(vkCreateDescriptorSetLayout(g.device, &tdl, nullptr, &g.tile_set_layout),
+                 "vkCreateDescriptorSetLayout");
+        VkPushConstantRange tpc = {VK_SHADER_STAGE_COMPUTE_BIT, 0, 16};
+        VkPipelineLayoutCreateInfo tpl = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+        tpl.setLayoutCount = 1;
+        tpl.pSetLayouts = &g.tile_set_layout;
+        tpl.pushConstantRangeCount = 1;
+        tpl.pPushConstantRanges = &tpc;
+        vk_check(vkCreatePipelineLayout(g.device, &tpl, nullptr, &g.tile_layout), "vkCreatePipelineLayout");
+        VkComputePipelineCreateInfo cpci = {VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
+        cpci.stage = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO};
+        cpci.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+        cpci.stage.module = make_module(gfx_vulkan_tile_comp, sizeof(gfx_vulkan_tile_comp));
+        cpci.stage.pName = "main";
+        cpci.layout = g.tile_layout;
+        vk_check(vkCreateComputePipelines(g.device, VK_NULL_HANDLE, 1, &cpci, nullptr, &g.tile_pipeline),
+                 "vkCreateComputePipelines");
+        vkDestroyShaderModule(g.device, cpci.stage.module, nullptr);
+        VkSamplerCreateInfo sci = {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+        sci.magFilter = sci.minFilter = VK_FILTER_LINEAR;
+        sci.addressModeU = sci.addressModeV = sci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        vk_check(vkCreateSampler(g.device, &sci, nullptr, &g.tile_sampler), "vkCreateSampler");
+    }
+
     g.fbs.resize(1);   // fb 0: the screen
     upload_white();
 }
@@ -1244,8 +1283,43 @@ static void vk_end_frame(void) {
     end_pass();
     Frame &f = g.frames[g.frame_slot];
     Framebuffer &screen = g.fbs[0];
-    uint32_t pw = 0, ph = 0;
-    VkImage present = g.platform->acquire && screen.color.image ? g.platform->acquire(&pw, &ph) : VK_NULL_HANDLE;
+    uint32_t pw = 0, ph = 0, micro = 0;
+    VkBuffer tiled = g.platform->acquire_buffer && screen.color.image
+                         ? g.platform->acquire_buffer(&pw, &ph, &micro)
+                         : VK_NULL_HANDLE;
+    VkImage present = !g.platform->acquire_buffer && g.platform->acquire && screen.color.image
+                          ? g.platform->acquire(&pw, &ph)
+                          : VK_NULL_HANDLE;
+    if (tiled) {
+        // One compute pass: scale, flip and tile into the scan-out buffer.
+        Image &src = readable_color(0);
+        barrier(f.draw, src, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        vkCmdBindPipeline(f.draw, VK_PIPELINE_BIND_POINT_COMPUTE, g.tile_pipeline);
+        VkDescriptorImageInfo ii = {g.tile_sampler, src.sample_view ? src.sample_view : src.view,
+                                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        VkDescriptorBufferInfo bi = {tiled, 0, VK_WHOLE_SIZE};
+        VkWriteDescriptorSet w[2] = {};
+        w[0].sType = w[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        w[0].dstBinding = 0;
+        w[0].descriptorCount = 1;
+        w[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        w[0].pImageInfo = &ii;
+        w[1].dstBinding = 1;
+        w[1].descriptorCount = 1;
+        w[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        w[1].pBufferInfo = &bi;
+        vkCmdPushDescriptorSetKHR(f.draw, VK_PIPELINE_BIND_POINT_COMPUTE, g.tile_layout, 0, 2, w);
+        const uint32_t push[4] = {pw, ph, (pw + 127) / 128, micro};
+        vkCmdPushConstants(f.draw, g.tile_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), push);
+        vkCmdDispatch(f.draw, (pw + 7) / 8, (ph + 7) / 8, 1);
+        VkMemoryBarrier mb = {VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+        mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        mb.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_HOST_READ_BIT;
+        vkCmdPipelineBarrier(f.draw, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 1,
+                             &mb, 0, nullptr, 0, nullptr);
+        g.bound_pipeline = VK_NULL_HANDLE;
+        g.desc_dirty = true;
+    }
     if (present) {
         Image &src = readable_color(0);
         barrier(f.draw, src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
@@ -1310,7 +1384,7 @@ static void vk_end_frame(void) {
     vk_check(vkQueueSubmit(g.queue, 1, &si, f.fence), "vkQueueSubmit");
     f.submitted = true;
     g.recording = false;
-    if (present && g.platform->present) {
+    if ((present || tiled) && g.platform->present) {
         g.platform->present();
     }
     g.frame_slot = (g.frame_slot + 1) % kFrames;

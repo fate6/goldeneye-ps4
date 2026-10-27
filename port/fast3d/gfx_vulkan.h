@@ -44,6 +44,11 @@ struct GfxVulkanPlatform {
     /* Optional: called after the frame that fills the acquired image has been
      * submitted (queue a flip behind it). */
     void (*present)(void);
+    /* Optional, used instead of acquire when set: a buffer to write the frame
+     * into in the PS4 VideoOut tiled layout (shaders/gfx_vulkan_tile.comp),
+     * for scan-out that takes tiled memory only. Blocks until it is free.
+     * *micro picks the pixel order within a micro tile (see the shader). */
+    VkBuffer (*acquire_buffer)(uint32_t *width, uint32_t *height, uint32_t *micro);
 };
 
 /* Call before gfx_init() with the rendering API set to gfx_vulkan_api. */
