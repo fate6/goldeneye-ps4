@@ -60,6 +60,15 @@ if ! grep -q "GE PS4 raster" "$GPU"; then
 fi
 [ "$(grep -c 'GE PS4 raster' "$GPU")" -eq 3 ] \
   || { echo "ac_gpu_info.c changed: raster config experiment not patched" >&2; exit 1; }
+# Modes 4 and 5 keep the system's raster config (CLEAR_STATE) instead of writing one.
+CMDBUF="$MESA/src/amd/common/ac_cmdbuf.c"
+if ! grep -q "GE PS4 raster" "$CMDBUF"; then
+  perl -0pi -e '
+    s/(static void\nac_set_raster_config\(const struct radeon_info \*info, struct ac_pm4_state \*pm4\)\n\{\n)/int ac_ps4_raster_mode(void);\n\n$1   if (ac_ps4_raster_mode() >= 4) \/\* GE PS4 raster: keep the system value from CLEAR_STATE \*\/\n      return;\n\n/;
+  ' "$CMDBUF"
+fi
+[ "$(grep -c 'GE PS4 raster' "$CMDBUF")" -eq 1 ] \
+  || { echo "ac_cmdbuf.c changed: raster config skip not patched" >&2; exit 1; }
 
 HERE_DIR="$HOME/DolphinPS4/scripts"
 cp "$script" "$HERE_DIR/.build-mesa-ge64.tmp.sh"
