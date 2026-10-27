@@ -80,6 +80,18 @@ if ! grep -q "GE PS4 raster" "$DESC"; then
 fi
 [ "$(grep -c 'GE PS4 raster' "$DESC")" -eq 2 ] \
   || { echo "ac_descriptors.c changed: ALT_TILE_MODE not patched" >&2; exit 1; }
+# Mode 7: the GNM driver's Neo init register writes appended to RADV's graphics preamble.
+cp "$(dirname "$0")/ge_neo_init.h" "$MESA/src/amd/vulkan/ge_neo_init.h"
+QUEUE="$MESA/src/amd/vulkan/radv_queue.c"
+if ! grep -q "GE PS4 raster" "$QUEUE"; then
+  perl -0pi -e '
+    s/(#include "ac_descriptors.h"\n)/$1#include "ge_neo_init.h" \/\* GE PS4 raster mode 7 \*\/\nint ac_ps4_raster_mode(void);\n/;
+    s/ac_pm4_create_sized\(&pdev->info, false, 512, false\);/ac_pm4_create_sized(&pdev->info, false, 1024, false); \/\* GE PS4 raster: room for mode 7 \*\//;
+    s/(   ac_pm4_finalize\(pm4\);\n   ac_pm4_emit_commands\(cs->b, pm4\);\n   ac_pm4_free_state\(pm4\);\n\n   radv_emit_compute\(device, cs, false\);)/   if (ac_ps4_raster_mode() == 7) {\n      for (unsigned i = 0; i < ARRAY_SIZE(ge_ps4_neo_init); i++)\n         ac_pm4_cmd_add(pm4, ge_ps4_neo_init[i]);\n   }\n\n$1/;
+  ' "$QUEUE"
+fi
+[ "$(grep -c 'GE PS4 raster' "$QUEUE")" -eq 2 ] && grep -q "ge_ps4_neo_init\[i\]" "$QUEUE" \
+  || { echo "radv_queue.c changed: Neo init sequence not patched" >&2; exit 1; }
 
 HERE_DIR="$HOME/DolphinPS4/scripts"
 cp "$script" "$HERE_DIR/.build-mesa-ge64.tmp.sh"
