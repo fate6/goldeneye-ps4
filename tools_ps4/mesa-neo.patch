@@ -1,6 +1,6 @@
 --- a/ac_ps4_drm.c
 +++ b/ac_ps4_drm.c
-@@ -93,6 +93,21 @@
+@@ -93,6 +93,67 @@
  #define PS4_GB_ADDR_CONFIG 0x00011003
  #define PS4_MC_ARB_RAMCFG 0x2 /* 16 banks */
  
@@ -19,32 +19,129 @@
 +   return neo;
 +}
 +
++/* GE PS4 raster experiment (env GE_RASTER, read by ac_get_raster_config too):
++ *  0 = Mesa's Bonaire config, 0x16000012 ("2 SEs / 4 RBs": one packer per SE);
++ *  1 = 2 SEs / 8 RBs, Tahiti's 0x2a00126a (both packers);
++ *  2 = Neo only: 4 SEs / 16 RBs / 36 CUs reported, Hawaii's 0x3a00161a + 0x2e;
++ *  3 = Neo only: as 2, with 16-pipe tiling (P16_32x32_8x16 tables from shadPS4's
++ *      alternate per-mode rules, GB_ADDR_CONFIG 16 pipes / 4 SEs), as Hawaii. */
++int ac_ps4_raster_mode(void);
++
++int
++ac_ps4_raster_mode(void)
++{
++   static int mode = -1;
++   if (mode < 0) {
++      const char *e = getenv("GE_RASTER");
++      mode = e ? atoi(e) : 0;
++      if (mode < 0 || mode > 3 || (mode >= 2 && !ps4_neo()))
++         mode = 0;
++   }
++   return mode;
++}
++
++static unsigned
++ps4_num_se(void)
++{
++   return ac_ps4_raster_mode() >= 2 ? 4 : 2;
++}
++
++static const uint32_t ps4_neo_tile_modes[32] = {
++   0x00800410, 0x00800c10, 0x00801410, 0x00801c10, 0x00802410, 0x00800408, 0x00801418,
++   0x00802418, 0x00000404, 0x00000408, 0x02000410, 0x02000414, 0x02000418, 0x00400408,
++   0x02400410, 0x02400430, 0x02400414, 0x02400418, 0x0240042c, 0x0100040c, 0x0100041c,
++   0x01000434, 0x01000424, 0x01000428, 0x0100043c, 0x01000420, 0x01000438, 0, 0, 0, 0, 0,
++};
++static const uint32_t ps4_neo_macrotile_modes[16] = {
++   0x98, 0x98, 0x84, 0x84, 0x80, 0x80, 0x40, 0x00, 0xd8, 0x98, 0x84, 0x80, 0x40, 0x40, 0x00, 0x00,
++};
++
++static bool
++ps4_p16(void)
++{
++   return ac_ps4_raster_mode() == 3;
++}
++#define PS4_TILE_MODES (ps4_p16() ? ps4_neo_tile_modes : ps4_tile_modes)
++#define PS4_MACROTILE_MODES (ps4_p16() ? ps4_neo_macrotile_modes : ps4_macrotile_modes)
++#define PS4_ADDR_CONFIG (ps4_p16() ? 0x00012004 : PS4_GB_ADDR_CONFIG)
++
  struct amdgpu_bo {
     uint32_t handle;
     uint64_t size;
-@@ -928,6 +943,7 @@
+@@ -928,6 +989,8 @@
        goto fail;
     ps4_log("radv/ps4: GPU address windows %#llx (16 GiB), %#llx (32-bit)\n",
             (unsigned long long)dev->va_start, (unsigned long long)dev->va32_start);
-+   ps4_log("radv/ps4: %s mode GPU\n", ps4_neo() ? "Neo (PS4 Pro)" : "base");
++   ps4_log("radv/ps4: %s mode GPU, raster mode %d (%u SEs)\n", ps4_neo() ? "Neo (PS4 Pro)" : "base",
++           ac_ps4_raster_mode(), ps4_num_se());
     util_vma_heap_init(&dev->va_heap, dev->va_start, PS4_VA_SIZE);
     util_vma_heap_init(&dev->va32_heap, dev->va32_start, PS4_VA32_SIZE);
  
-@@ -2632,7 +2648,7 @@
+@@ -2632,19 +2695,19 @@
     info->chip_external_rev = 0x14; /* Bonaire range: identified as CHIP_BONAIRE (gfx7) */
     info->family_id = FAMILY_CI;
     info->ids_flags = AMDGPU_IDS_FLAGS_FUSION;
 -   info->max_engine_clk = 800000;
 +   info->max_engine_clk = ps4_neo() ? 911000 : 800000;
     info->max_memory_clk = 1375000;
-    info->num_shader_engines = 2;
+-   info->num_shader_engines = 2;
++   info->num_shader_engines = ps4_num_se();
     info->num_shader_arrays_per_engine = 1;
-@@ -2660,7 +2676,7 @@
-    d->num_shader_engines = 2;
+-   info->rb_pipes = 8;
+-   info->enabled_rb_pipes_mask = 0xff;
++   info->rb_pipes = 4 * ps4_num_se();
++   info->enabled_rb_pipes_mask = (1u << (4 * ps4_num_se())) - 1;
+    info->gpu_counter_freq = 100000; /* kHz */
+    info->mc_arb_ramcfg = PS4_MC_ARB_RAMCFG;
+-   info->gb_addr_cfg = PS4_GB_ADDR_CONFIG;
+-   memcpy(info->gb_tile_mode, ps4_tile_modes, sizeof(ps4_tile_modes));
+-   memcpy(info->gb_macro_tile_mode, ps4_macrotile_modes, sizeof(ps4_macrotile_modes));
+-   info->cu_bitmap[0][0] = 0x1ff; /* 9 CUs per shader engine, 18 total */
+-   info->cu_bitmap[1][0] = 0x1ff;
++   info->gb_addr_cfg = PS4_ADDR_CONFIG;
++   memcpy(info->gb_tile_mode, PS4_TILE_MODES, sizeof(ps4_tile_modes));
++   memcpy(info->gb_macro_tile_mode, PS4_MACROTILE_MODES, sizeof(ps4_macrotile_modes));
++   for (unsigned se = 0; se < ps4_num_se(); se++)
++      info->cu_bitmap[se][0] = 0x1ff; /* 9 CUs per shader engine */
+    info->vram_type = AMDGPU_VRAM_TYPE_GDDR5;
+    info->vram_bit_width = 256;
+    return 0;
+@@ -2657,16 +2720,16 @@
+    d->device_id = 0x9920;
+    d->external_rev = 0x14;
+    d->family = FAMILY_CI;
+-   d->num_shader_engines = 2;
++   d->num_shader_engines = ps4_num_se();
     d->num_shader_arrays_per_engine = 1;
     d->gpu_counter_freq = 100000;
 -   d->max_engine_clock = 800000;
 +   d->max_engine_clock = ps4_neo() ? 911000 : 800000;
     d->max_memory_clock = 1375000;
-    d->cu_active_number = 18;
-    d->cu_bitmap[0][0] = 0x1ff;
+-   d->cu_active_number = 18;
+-   d->cu_bitmap[0][0] = 0x1ff;
+-   d->cu_bitmap[1][0] = 0x1ff;
+-   d->enabled_rb_pipes_mask = 0xff;
+-   d->num_rb_pipes = 8;
++   d->cu_active_number = 9 * ps4_num_se();
++   for (unsigned se = 0; se < ps4_num_se(); se++)
++      d->cu_bitmap[se][0] = 0x1ff;
++   d->enabled_rb_pipes_mask = (1u << (4 * ps4_num_se())) - 1;
++   d->num_rb_pipes = 4 * ps4_num_se();
+    d->num_hw_gfx_contexts = 8;
+    d->ids_flags = AMDGPU_IDS_FLAGS_FUSION;
+    d->virtual_address_offset = dev->va_start;
+@@ -2740,11 +2803,11 @@
+    for (unsigned i = 0; i < count; i++) {
+       const unsigned reg = dword_offset + i;
+       if (reg >= 0x2644 && reg < 0x2644 + 32)
+-         values[i] = ps4_tile_modes[reg - 0x2644];
++         values[i] = PS4_TILE_MODES[reg - 0x2644];
+       else if (reg >= 0x2664 && reg < 0x2664 + 16)
+-         values[i] = ps4_macrotile_modes[reg - 0x2664];
++         values[i] = PS4_MACROTILE_MODES[reg - 0x2664];
+       else if (reg == 0x263e)
+-         values[i] = PS4_GB_ADDR_CONFIG;
++         values[i] = PS4_ADDR_CONFIG;
+       else
+          return -EINVAL;
+    }

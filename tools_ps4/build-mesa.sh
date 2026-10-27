@@ -6,7 +6,8 @@
 #    became VK_ERROR_UNKNOWN);
 #  - geometry-shader rings >= 16 MiB (the system owns the ring size registers;
 #    unused by this renderer, kept so the build matches the tested Mesa);
-#  - PS4 Pro Neo mode detection: clock and log (tools_ps4/mesa-neo.patch).
+#  - PS4 Pro Neo mode detection: clock and log, and the raster config
+#    experiment GE_RASTER=0/1/2 (tools_ps4/mesa-neo.patch, ac_gpu_info.c).
 # The Mesa source tree is shared with DolphinPS4's build; each run puts the
 # right ac_ps4_drm.c in place, so run DolphinPS4's build-mesa.sh again before
 # DolphinPS4 work.
@@ -47,6 +48,18 @@ if ! grep -q "GE PS4 GS ring minimum" "$INFO"; then
 fi
 [ "$(grep -c 'GE PS4 GS ring minimum' "$INFO")" -eq 1 ] \
   || { echo "radv_shader_info.c changed: GS ring minimum not patched" >&2; exit 1; }
+
+# Raster config experiment (GE_RASTER, mesa-neo.patch): the winsys picks it;
+# the weak default keeps DolphinPS4's build (same Mesa tree) on Bonaire's.
+GPU="$MESA/src/amd/common/ac_gpu_info.c"
+if ! grep -q "GE PS4 raster" "$GPU"; then
+  perl -0pi -e '
+    s/(void ac_get_raster_config\(const struct radeon_info \*info)/\/\* GE PS4 raster: 0 = Mesa default; the GoldenEye 64 winsys (ac_ps4_drm.c) overrides this. \*\/\nint ac_ps4_raster_mode(void);\n__attribute__((weak)) int ac_ps4_raster_mode(void)\n{\n   return 0;\n}\n\n$1/;
+    s/(   \/\* drm\/radeon on Kaveri is buggy)/   if (info->family == CHIP_BONAIRE && ac_ps4_raster_mode() >= 2) { \/\* GE PS4 raster: Neo, 4 SEs \/ 16 RBs (as Hawaii) \*\/\n      raster_config = 0x3a00161a;\n      raster_config_1 = 0x0000002e;\n   } else if (info->family == CHIP_BONAIRE && ac_ps4_raster_mode() == 1) { \/\* GE PS4 raster: 2 SEs \/ 8 RBs (as Tahiti) \*\/\n      raster_config = 0x2a00126a;\n      raster_config_1 = 0x00000000;\n   }\n\n$1/;
+  ' "$GPU"
+fi
+[ "$(grep -c 'GE PS4 raster' "$GPU")" -eq 3 ] \
+  || { echo "ac_gpu_info.c changed: raster config experiment not patched" >&2; exit 1; }
 
 HERE_DIR="$HOME/DolphinPS4/scripts"
 cp "$script" "$HERE_DIR/.build-mesa-ge64.tmp.sh"
