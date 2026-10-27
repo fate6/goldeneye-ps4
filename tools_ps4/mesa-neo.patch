@@ -1,6 +1,6 @@
 --- a/ac_ps4_drm.c
 +++ b/ac_ps4_drm.c
-@@ -93,6 +93,72 @@
+@@ -93,6 +93,75 @@
  #define PS4_GB_ADDR_CONFIG 0x00011003
  #define PS4_MC_ARB_RAMCFG 0x2 /* 16 banks */
  
@@ -28,7 +28,10 @@
 + *  4 = Neo only: 4 SEs / 16 RBs / 36 CUs reported, and the raster config is not
 + *      written at all (ac_cmdbuf.c): the system's CLEAR_STATE value stays, as for
 + *      GNM apps, whose firmware init sequences (shadPS4 captures) never set it;
-+ *  5 = as 0, but the raster config is not written (control for 4). */
++ *  5 = as 0, but the raster config is not written (control for 4);
++ *  6 = Neo only: as 4, with the 16-pipe tables, and ac_descriptors.c sets the Neo
++ *      ALT_TILE_MODE bit (CB_COLOR_INFO bit 31, texture dword 6 bit 24; bit
++ *      positions from OpenGNM) so the hardware reads its alternate tile table. */
 +int ac_ps4_raster_mode(void);
 +
 +int
@@ -38,7 +41,7 @@
 +   if (mode < 0) {
 +      const char *e = getenv("GE_RASTER");
 +      mode = e ? atoi(e) : 0;
-+      if (mode < 0 || mode > 5 || (mode >= 2 && mode <= 4 && !ps4_neo()))
++      if (mode < 0 || mode > 6 || ((mode == 6 || (mode >= 2 && mode <= 4)) && !ps4_neo()))
 +         mode = 0;
 +   }
 +   return mode;
@@ -48,7 +51,7 @@
 +ps4_num_se(void)
 +{
 +   const int mode = ac_ps4_raster_mode();
-+   return mode >= 2 && mode <= 4 ? 4 : 2;
++   return (mode >= 2 && mode <= 4) || mode == 6 ? 4 : 2;
 +}
 +
 +static const uint32_t ps4_neo_tile_modes[32] = {
@@ -64,7 +67,7 @@
 +static bool
 +ps4_p16(void)
 +{
-+   return ac_ps4_raster_mode() == 3;
++   return ac_ps4_raster_mode() == 3 || ac_ps4_raster_mode() == 6;
 +}
 +#define PS4_TILE_MODES (ps4_p16() ? ps4_neo_tile_modes : ps4_tile_modes)
 +#define PS4_MACROTILE_MODES (ps4_p16() ? ps4_neo_macrotile_modes : ps4_macrotile_modes)
@@ -73,7 +76,7 @@
  struct amdgpu_bo {
     uint32_t handle;
     uint64_t size;
-@@ -928,6 +994,8 @@
+@@ -928,6 +997,8 @@
        goto fail;
     ps4_log("radv/ps4: GPU address windows %#llx (16 GiB), %#llx (32-bit)\n",
             (unsigned long long)dev->va_start, (unsigned long long)dev->va32_start);
@@ -82,7 +85,7 @@
     util_vma_heap_init(&dev->va_heap, dev->va_start, PS4_VA_SIZE);
     util_vma_heap_init(&dev->va32_heap, dev->va32_start, PS4_VA32_SIZE);
  
-@@ -2632,19 +2700,19 @@
+@@ -2632,19 +2703,19 @@
     info->chip_external_rev = 0x14; /* Bonaire range: identified as CHIP_BONAIRE (gfx7) */
     info->family_id = FAMILY_CI;
     info->ids_flags = AMDGPU_IDS_FLAGS_FUSION;
@@ -111,7 +114,7 @@
     info->vram_type = AMDGPU_VRAM_TYPE_GDDR5;
     info->vram_bit_width = 256;
     return 0;
-@@ -2657,16 +2725,16 @@
+@@ -2657,16 +2728,16 @@
     d->device_id = 0x9920;
     d->external_rev = 0x14;
     d->family = FAMILY_CI;
@@ -135,7 +138,7 @@
     d->num_hw_gfx_contexts = 8;
     d->ids_flags = AMDGPU_IDS_FLAGS_FUSION;
     d->virtual_address_offset = dev->va_start;
-@@ -2740,11 +2808,11 @@
+@@ -2740,11 +2811,11 @@
     for (unsigned i = 0; i < count; i++) {
        const unsigned reg = dword_offset + i;
        if (reg >= 0x2644 && reg < 0x2644 + 32)

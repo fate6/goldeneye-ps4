@@ -69,6 +69,17 @@ if ! grep -q "GE PS4 raster" "$CMDBUF"; then
 fi
 [ "$(grep -c 'GE PS4 raster' "$CMDBUF")" -eq 1 ] \
   || { echo "ac_cmdbuf.c changed: raster config skip not patched" >&2; exit 1; }
+# Mode 6: tiled colour targets and textures use the Neo alternate (16-pipe) tile table.
+DESC="$MESA/src/amd/common/ac_descriptors.c"
+if ! grep -q "GE PS4 raster" "$DESC"; then
+  perl -0pi -e '
+    s/(\nvoid\nac_build_texture_descriptor\()/\nint ac_ps4_raster_mode(void);\n$1/;
+    s/(      desc\[3\] \|= S_008F1C_TILING_INDEX\(index\);\n)/$1      if (ac_ps4_raster_mode() == 6 && base_level_info->mode >= RADEON_SURF_MODE_1D)\n         desc[6] |= 1u << 24; \/\* GE PS4 raster: Neo ALT_TILE_MODE \*\/\n/;
+    s/(      cb->cb_color_attrib \|= S_028C74_TILE_MODE_INDEX\(tile_mode_index\);\n)/$1      if (ac_ps4_raster_mode() == 6 && level_info->mode >= RADEON_SURF_MODE_1D)\n         cb->cb_color_info |= 1u << 31; \/\* GE PS4 raster: Neo ALT_TILE_MODE \*\/\n/;
+  ' "$DESC"
+fi
+[ "$(grep -c 'GE PS4 raster' "$DESC")" -eq 2 ] \
+  || { echo "ac_descriptors.c changed: ALT_TILE_MODE not patched" >&2; exit 1; }
 
 HERE_DIR="$HOME/DolphinPS4/scripts"
 cp "$script" "$HERE_DIR/.build-mesa-ge64.tmp.sh"
