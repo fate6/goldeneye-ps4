@@ -29,6 +29,32 @@
 #ifdef PORT
 #include <stdlib.h>
 #include "envflag.h"
+#include "frametiming.h"
+
+/* The Rare logo and gun barrel advance once per rendered frame (logo spin,
+ * barrel slide, eye counters, mode changes, and the eye anim's hardcoded
+ * 2 ticks a frame of 60 Hz anim data): authored for 30 fps, so at 60 fps
+ * they ran twice as fast and finished ahead of the intro music. Motion
+ * (spin, slide, sway, the eye anim) now advances per VI tick, so it stays
+ * smooth at 60 fps; counters and mode changes step once two ticks have
+ * passed (one step a frame at most, as on the N64). */
+static s32 s_IntroStep = 1;
+static s32 s_IntroTicks = 0;
+
+static void introUpdateStep(void)
+{
+    s_IntroTicks += speedgraphframes;
+    s_IntroStep = s_IntroTicks >= 2;
+    if (s_IntroStep) s_IntroTicks = 0;
+}
+#define INTRO_STEP s_IntroStep
+/* A per-30-fps-frame amount, scaled to the ticks this frame took. */
+#define INTRO_PER_TICK(v) ((v) * (f32)speedgraphframes * 0.5f)
+#define INTRO_PER_TICK_INT(v) ((v) * speedgraphframes / 2)
+#else
+#define INTRO_STEP 1
+#define INTRO_PER_TICK(v) (v)
+#define INTRO_PER_TICK_INT(v) (v)
 #endif
 
 
@@ -333,7 +359,9 @@ Gfx *insert_bond_eye_intro(Gfx *gdl) {
     matrix_4x4_set_lookat_target(&matrix, gunbarrelPosition1[0], gunbarrelPosition1[1], gunbarrelPosition1[2], (gunbarrelPosition1[0] + gunbarrelPosition2[0]), (gunbarrelPosition1[1] + gunbarrelPosition2[1]), (gunbarrelPosition1[2] + gunbarrelPosition2[2]), gunbarrelPosition3[0], gunbarrelPosition3[1], gunbarrelPosition3[2]);
 
 #if defined REFRESH_PAL
-    return sub_GAME_7F007F30(gdl, 1, &matrix);
+    return sub_GAME_7F007F30(gdl, INTRO_STEP ? 1 : 0, &matrix);
+#elif defined(PORT)
+    return sub_GAME_7F007F30(gdl, speedgraphframes, &matrix);   /* one anim tick per VI tick */
 #else
     return sub_GAME_7F007F30(gdl, 2, &matrix);
 #endif
@@ -362,9 +390,9 @@ Gfx *load_display_rare_logo(Gfx *gdl, s32 arg1, s32 arg2, s32 arg3, s32 arg4) {
     gSPMatrix(gdl++,  osVirtualToPhysical(&matrixBufferRareLogo1[D_8002A7D0]), (G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_MODELVIEW));
     guRotate(&matrixBufferRareLogo2[D_8002A7D0], D_8002A89C, 0.0f, 1.0f, 0.0f);
 #if defined(REFRESH_PAL)
-    D_8002A89C += 2.4f;
+    D_8002A89C += INTRO_PER_TICK(2.4f);
 #else
-    D_8002A89C += 2.0f;
+    D_8002A89C += INTRO_PER_TICK(2.0f);
 #endif
     gSPMatrix(gdl++, osVirtualToPhysical(&matrixBufferRareLogo2[D_8002A7D0]), (G_MTX_NOPUSH | G_MTX_MUL | G_MTX_MODELVIEW));
     gSPSetLights1(gdl++, gunbarrelLights);
@@ -420,6 +448,9 @@ Gfx *retrieve_display_rareware_logo(Gfx *gdl)
 #define RAREWARE_LOGO_EYE_COUNT2 290
 #endif
 
+#ifdef PORT
+    introUpdateStep();
+#endif
     D_8002A7D0 = (1 - D_8002A7D0);
     gSPSegment(gdl++, SPSEGMENT_GETITLE, osVirtualToPhysical(virtualaddress));
     if ((gunbarrel_mode == 0) || (gunbarrel_mode == 1)) {
@@ -441,7 +472,7 @@ Gfx *retrieve_display_rareware_logo(Gfx *gdl)
             var2 = 0;
         }
         gdl = load_display_rare_logo(gdl, 403, 488, g_TitleX, (var1 * var2) / 255);
-        if (intro_eye_counter++ >= RAREWARE_LOGO_EYE_COUNT1) {
+        if (INTRO_STEP && intro_eye_counter++ >= RAREWARE_LOGO_EYE_COUNT1) {
             if (intro_eye_counter >= RAREWARE_LOGO_EYE_COUNT2) {
                 intro_eye_counter = 0;
                 gunbarrel_mode++;
@@ -636,13 +667,18 @@ void clearChrGunModelInstances(void)
  * Address: 0x7F009254
 */
 Gfx *renderGunbarrelEyeIntroSequence (Gfx *gdl) {
+#ifdef PORT
+    introUpdateStep();
+#endif
     D_8002A7D0 = (1 - D_8002A7D0);
     switch (gunbarrel_mode - 2)
     {
     case 0:
         gdl = manipulateGunbarrelAndLogoMatrices(gdl);
-        g_TitleX += XINC;
-        if (word_CODE_bss_80069584 < 0) {
+        g_TitleX += INTRO_PER_TICK(XINC);
+        if (!INTRO_STEP) {
+            /* no counter step this frame */
+        } else if (word_CODE_bss_80069584 < 0) {
             word_CODE_bss_80069584 = 200;
             titleTransitionX = (g_TitleX - XDEC);
         } else {
@@ -673,7 +709,7 @@ Gfx *renderGunbarrelEyeIntroSequence (Gfx *gdl) {
         if (g_TitleX < 600.0f) {
             gdl = insert_bond_eye_intro(gdl);
         }
-        g_TitleX -= XDEC3;
+        g_TitleX -= INTRO_PER_TICK(XDEC3);
         if (g_TitleX <= -80.0f) {
             gunbarrel_mode++;
             intro_eye_counter = 20;
@@ -684,6 +720,7 @@ Gfx *renderGunbarrelEyeIntroSequence (Gfx *gdl) {
         gdl = insert_sniper_sight_eye_intro(gdl);
         gdl = insert_sight_backdrop_eye_intro(gdl);
         gdl = insert_bond_eye_intro(gdl);
+        if (!INTRO_STEP) break;
         intro_eye_counter--;
         if (intro_eye_counter < 0) {
             gunbarrel_mode++;
@@ -694,16 +731,23 @@ Gfx *renderGunbarrelEyeIntroSequence (Gfx *gdl) {
         break;
 
     case 3:
-        intro_eye_counter--;
-        if (intro_eye_counter == 0) {
+        if (INTRO_STEP) intro_eye_counter--;
+        if (INTRO_STEP && intro_eye_counter == 0) {
             intro_state_blood_animation = die_blood_image_routine(1);
             intro_eye_counter = 2;
         }
+#ifdef PORT
+        else {
+            /* The overlay reads the image from this frame's dyn memory: rebuild
+             * it without advancing (as gameplay does while paused). */
+            die_blood_image_routine(2);
+        }
+#endif
         gdl = insert_sniper_sight_eye_intro(gdl);
         gdl = insert_sight_backdrop_eye_intro(gdl);
         gdl = insert_bond_eye_intro(gdl);
         gdl = gunbarrelBloodOverlayDL(gdl);
-        if (intro_state_blood_animation != 0) {
+        if (INTRO_STEP && intro_state_blood_animation != 0) {
             gunbarrel_mode++;
             word_CODE_bss_80069584 = 0;
             titleTransitionX = g_TitleX;
@@ -712,14 +756,14 @@ Gfx *renderGunbarrelEyeIntroSequence (Gfx *gdl) {
         break;
 
     case 4:
-        word_CODE_bss_80069584 += INCVAL;
-        intro_eye_counter++;
+        word_CODE_bss_80069584 += INTRO_PER_TICK_INT(INCVAL);
+        if (INTRO_STEP) intro_eye_counter++;
         g_TitleX = ((sins(word_CODE_bss_80069584) * 64.0f) / 32768.0f) + titleTransitionX;
         gdl = insert_sniper_sight_eye_intro(gdl);
         gdl = insert_sight_backdrop_eye_intro(gdl);
         gdl = insert_bond_eye_intro(gdl);
         gdl = sub_GAME_7F01CA18(gdl);
-        if (intro_eye_counter >= INTRO_EYE_COUNTER_CASE_4)
+        if (INTRO_STEP && intro_eye_counter >= INTRO_EYE_COUNTER_CASE_4)
         {
             intro_eye_counter = 0;
             gunbarrel_mode++;
@@ -727,17 +771,17 @@ Gfx *renderGunbarrelEyeIntroSequence (Gfx *gdl) {
         break;
 
     case 5:
-        word_CODE_bss_80069584 += INCVAL;
+        word_CODE_bss_80069584 += INTRO_PER_TICK_INT(INCVAL);
         g_TitleX = ((sins(word_CODE_bss_80069584) * 64.0f) / 32768.0f) + titleTransitionX;
         gdl = insert_sniper_sight_eye_intro(gdl);
         gdl = insert_sight_backdrop_eye_intro(gdl);
         gdl = insert_bond_eye_intro(gdl);
         gdl = sub_GAME_7F01CA18(gdl);
         
-        intro_eye_counter += INTRO_EYE_COUNTER_CASE_5_ADD;
+        if (INTRO_STEP) intro_eye_counter += INTRO_EYE_COUNTER_CASE_5_ADD;
         
         gdl = sub_GAME_7F007E70(gdl, intro_eye_counter);
-        if (intro_eye_counter >= 0xF7) {
+        if (INTRO_STEP && intro_eye_counter >= 0xF7) {
             intro_eye_counter = 0;
             gunbarrel_mode++;                
         }
@@ -746,7 +790,7 @@ Gfx *renderGunbarrelEyeIntroSequence (Gfx *gdl) {
     case 6:
         gSPDisplayList(gdl++, &dlBasicGeometry);
         gdl = clear_framebuffer_black(gdl);
-        if (intro_eye_counter++ >= INTRO_EYE_COUNTER_CASE_6) {
+        if (INTRO_STEP && intro_eye_counter++ >= INTRO_EYE_COUNTER_CASE_6) {
             intro_eye_counter = 0;
             gunbarrel_mode++;
         }
