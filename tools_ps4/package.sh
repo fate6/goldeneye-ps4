@@ -4,19 +4,24 @@
 # the user's ROM and the converted sidecars live in /data/GoldenEye64/data
 # (tools_ps4/upload-data.sh).
 #   tools_ps4/package.sh <version XX.YY> [upload]
-# GE_PS4_ICON: 512x512 icon0.png (not in the repo; default: the local one).
+# Package art: tools_ps4/sce_sys/ holds original placeholder art
+# (make-placeholder-art.py). A private build can use its own: every PNG in
+# tools_ps4/sce_sys.local/ (gitignored, needs icon0.png) replaces the whole set,
+# or GE_PS4_ART=<dir> names another folder.
 set -euo pipefail
 source "$HOME/DolphinPS4/scripts/ps4-env.sh"
 SRC="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD="${GE_PS4_BUILD:-$SRC/build-ps4}"
 VERSION="${1:?version XX.YY}"
-ICON="${GE_PS4_ICON:-/mnt/c/claude/PS4_ports/n64/goldeneye/ps4/sce_sys/icon0.png}"
+ART="$SRC/tools_ps4/sce_sys"
+[ -d "$SRC/tools_ps4/sce_sys.local" ] && ART="$SRC/tools_ps4/sce_sys.local"
+ART="${GE_PS4_ART:-$ART}"
 HOST="ftp://${PS4_HOST:-10.0.0.150}:${PS4_FTP_PORT:-2121}"
 OUT="$PS4_BUILD_ROOT/out"
 
 eboot="$BUILD/ge007_eboot/eboot.bin"
 [ -f "$eboot" ] || { echo "no eboot.bin: run tools_ps4/build.sh first" >&2; exit 1; }
-[ -f "$ICON" ] || { echo "no icon at $ICON (set GE_PS4_ICON)" >&2; exit 1; }
+[ -f "$ART/icon0.png" ] || { echo "no icon0.png in $ART (set GE_PS4_ART)" >&2; exit 1; }
 
 prx="$SRC/build-ps4-radv/libGE64Radv.prx"
 [ -f "$prx" ] || { echo "no $prx: run tools_ps4/build-radv-prx.sh" >&2; exit 1; }
@@ -26,7 +31,8 @@ rm -rf "$stage"
 mkdir -p "$stage/sce_sys" "$stage/sce_module"
 cp "$eboot" "$stage/"
 cp "$prx" "$stage/sce_module/"   # the Vulkan driver (port/ps4/ps4_vulkan.cpp)
-cp "$ICON" "$stage/sce_sys/icon0.png"
+cp "$ART"/*.png "$stage/sce_sys/"
+echo "package art: $ART"
 # Plain homebrew identity: Vulkan through RADV, no Piglet modules bundled.
 # param.sfo ATTRIBUTE bit 23 ("supports NEO mode"): a PS4 Pro runs the game in
 # Neo mode (36 CUs at 911 MHz; the base tiling stays valid, tested on the

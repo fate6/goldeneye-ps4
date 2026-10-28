@@ -211,3 +211,6 @@ docs/media/*.mp4
 /build-ps4-logs/
 /build-ps4-radv/
 /build-clang/
+# Local package art for private builds (official artwork, never committed);
+# tools_ps4/package.sh prefers it over the placeholder in tools_ps4/sce_sys/.
+/tools_ps4/sce_sys.local/
