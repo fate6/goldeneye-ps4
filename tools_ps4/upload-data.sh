@@ -8,7 +8,8 @@
 set -euo pipefail
 SRC="$(cd "$(dirname "$0")/.." && pwd)"
 DATA="${1:-$SRC/data}"
-HOST="ftp://${PS4_HOST:-10.0.0.150}:${PS4_FTP_PORT:-2121}"
+source "$(dirname "$0")/env.sh"
+HOST="$(ge_ps4_ftp)" || exit 1
 REMOTE=/data/GoldenEye64/data
 
 for f in ge007.ntsc-final.z64 pcmodels-ntsc-final/pcmodels.bin pcmodels-ntsc-final/manifest.csv \

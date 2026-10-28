@@ -214,3 +214,4 @@ docs/media/*.mp4
 # Local package art for private builds (official artwork, never committed);
 # tools_ps4/package.sh prefers it over the placeholder in tools_ps4/sce_sys/.
 /tools_ps4/sce_sys.local/
+/tools_ps4/local.env

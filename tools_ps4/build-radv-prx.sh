@@ -9,7 +9,8 @@
 # in use) - see port/include/portaddr.h. The eboot always loads at 0x400000.
 #   tools_ps4/build-radv-prx.sh [out-dir]
 set -euo pipefail
-source "$HOME/DolphinPS4/scripts/ps4-env.sh"
+source "$(dirname "$0")/env.sh"
+ge_dolphinps4
 SRC="$(cd "$(dirname "$0")/.." && pwd)"
 OUTDIR="${1:-$SRC/build-ps4-radv}"
 MESA="${GE_PS4_MESA_BUILD:-$PS4_BUILD_ROOT/build/mesa-ge64}"

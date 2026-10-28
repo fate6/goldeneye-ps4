@@ -5,7 +5,8 @@
 set -uo pipefail
 name="${1:?name}"
 lines="${2:-40}"
-HOST="ftp://${PS4_HOST:-10.0.0.150}:${PS4_FTP_PORT:-2121}"
+source "$(dirname "$0")/env.sh"
+HOST="$(ge_ps4_ftp)" || exit 1
 dir="$HOME/ps4-logs/ge64-$name"
 mkdir -p "$dir"
 cd "$dir" || exit 1

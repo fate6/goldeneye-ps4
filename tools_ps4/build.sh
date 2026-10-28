@@ -3,10 +3,11 @@
 # (clang 21 + libc++ 21 on OpenOrbis via PacBrew).
 #   tools_ps4/build.sh [configure] [ninja args...]
 set -uo pipefail
-source "$HOME/DolphinPS4/scripts/ps4-env.sh"
+source "$(dirname "$0")/env.sh"
+ge_dolphinps4
 SRC="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD="${GE_PS4_BUILD:-$SRC/build-ps4}"
-TC="$HOME/DolphinPS4/toolchain"
+TC="$DOLPHINPS4/toolchain"
 LOG="$BUILD-logs"
 mkdir -p "$LOG"
 
