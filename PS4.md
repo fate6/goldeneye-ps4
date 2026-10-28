@@ -38,9 +38,8 @@ Everything can be rebound in the options menu (Layout presets > Custom).
 
 1. Build or obtain `IV0000-GOLD00064_00-GOLDENEYE6400000.pkg` and install it with
    GoldHEN's package installer.
-2. Make the data files from your ROM on a PC: follow
-   [docs/building.md](docs/building.md) sections 2 and 4 (asset extraction and the
-   three `tools_pc/d*_emit.py` passes).
+2. Make the data files from your ROM on a PC (Python 3 only): see
+   [docs/ps4-building.md](docs/ps4-building.md#8-game-data-from-your-rom).
 3. Copy them to the console under `/data/GoldenEye64/data/`:
    ```
    ge007.ntsc-final.z64
@@ -53,30 +52,19 @@ Settings, saves and logs live in `/data/GoldenEye64/` (`ge007.ini`, `ge007.log`)
 
 ## Building
 
-Linux or WSL (tested on Ubuntu 24.04).
+Linux or WSL 2 (Ubuntu 24.04). In short: clang 21, PacBrew's OpenOrbis toolchain,
+[DolphinPS4](https://github.com/iHaiDeeZ/DolphinPS4) at commit `6297f9d` for the
+C++ runtime and the Mesa patch, then:
 
-1. **Toolchain and Mesa:** clone [DolphinPS4](https://github.com/iHaiDeeZ/DolphinPS4)
-   to `~/DolphinPS4` (or set `DOLPHINPS4`), check out the tested commit
-   `6297f9d5889f87fe657a3dea784ff8c6b40ed63b`, and set up its toolchain as its
-   [BUILDING.md](https://github.com/iHaiDeeZ/DolphinPS4/blob/main/BUILDING.md)
-   describes (PacBrew OpenOrbis toolchain, clang 21, the libc++ sysroot, the Mesa
-   source tree). The scripts here warn when the checkout is at another commit.
-2. **Console address** (for the upload scripts): put `PS4_HOST=<console IP>` in
-   `tools_ps4/local.env` (gitignored; `PS4_FTP_PORT` defaults to 2121).
-3. Build:
-   ```
-   bash tools_ps4/build-mesa.sh setup     # RADV for this game (first time; later without "setup")
-   bash tools_ps4/build-radv-prx.sh       # -> build-ps4-radv/libGE64Radv.prx
-   bash tools_ps4/build.sh                # -> build-ps4/ge007_eboot/eboot.bin
-   bash tools_ps4/package.sh 01.00        # -> the .pkg; add "upload" to send it to /data/pkg
-   ```
+```
+bash tools_ps4/build-mesa.sh setup
+bash tools_ps4/build-radv-prx.sh
+bash tools_ps4/build.sh
+bash tools_ps4/package.sh 01.00
+```
 
-The package art in `tools_ps4/sce_sys/` is a placeholder
-(`tools_ps4/make-placeholder-art.py`). To use your own, put `icon0.png` (512x512)
-and optionally `pic1.png` (1920x1080) in `tools_ps4/sce_sys.local/` (gitignored).
-
-Diagnostics: `tools_ps4/logs.sh <name>` fetches the logs;
-`/data/GoldenEye64/env.txt` takes environment switches such as `GE_VKDEBUG=1`.
+The full step-by-step guide, from a fresh Ubuntu to an installed package, is
+**[docs/ps4-building.md](docs/ps4-building.md)**.
 
 ## How it works
 
