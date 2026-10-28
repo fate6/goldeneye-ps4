@@ -9,14 +9,14 @@
 # tools_ps4/sce_sys.local/ (gitignored, needs icon0.png) replaces the whole set,
 # or GE_PS4_ART=<dir> names another folder.
 set -euo pipefail
-source "$HOME/DolphinPS4/scripts/ps4-env.sh"
+source "$(dirname "$0")/env.sh"
+ge_dolphinps4
 SRC="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD="${GE_PS4_BUILD:-$SRC/build-ps4}"
 VERSION="${1:?version XX.YY}"
 ART="$SRC/tools_ps4/sce_sys"
 [ -d "$SRC/tools_ps4/sce_sys.local" ] && ART="$SRC/tools_ps4/sce_sys.local"
 ART="${GE_PS4_ART:-$ART}"
-HOST="ftp://${PS4_HOST:-10.0.0.150}:${PS4_FTP_PORT:-2121}"
 OUT="$PS4_BUILD_ROOT/out"
 
 eboot="$BUILD/ge007_eboot/eboot.bin"
@@ -41,16 +41,22 @@ attribute=0x00800000
 [ "${GE_PS4_NEO:-1}" = 0 ] && attribute=0
 makepkg="$(mktemp)"
 sed -e "s#^    set_entry ATTRIBUTE Integer 4 0\$#    set_entry ATTRIBUTE Integer 4 $attribute#" \
-    "$HOME/DolphinPS4/scripts/make-pkg.sh" > "$makepkg"
+    -e 's#^cp "$OPENORBIS/samples/piglet/sce_module/"\*\.prx "$STAGE/sce_module/"$#true  \# no sample modules#' \
+    "$DOLPHINPS4/scripts/make-pkg.sh" > "$makepkg"
 grep -q "set_entry ATTRIBUTE Integer 4 $attribute\$" "$makepkg" \
   || { echo "make-pkg.sh changed: plain ATTRIBUTE not patched" >&2; exit 1; }
-pkg="$(SFO_STYLE=plain DOLPHIN_PS4_MODULES_DIR=/nonexistent \
+# No Sony modules in the package: the OpenOrbis samples' libc.prx and
+# libSceFios2.prx aren't imported by the eboot, and right.sprx isn't needed.
+grep -q "^true  # no sample modules" "$makepkg" \
+  || { echo "make-pkg.sh changed: sample modules not removed" >&2; exit 1; }
+pkg="$(SFO_STYLE=plain DOLPHIN_PS4_MODULES_DIR=/nonexistent NO_RIGHT_SPRX=1 \
     bash "$makepkg" "$stage" GOLD00064 "GoldenEye 007" "$VERSION" \
     GOLDENEYE64 "$OUT" | tail -1)"
 rm -f "$makepkg"
 echo "param.sfo ATTRIBUTE $attribute"
 echo "package: $pkg"
 if [ "${2:-}" = upload ]; then
+    HOST="$(ge_ps4_ftp)" || exit 1
     curl -sS --max-time 300 -T "$pkg" "$HOST/data/pkg/"
     echo "uploaded $(basename "$pkg")"
     # The previous run's diagnostics (our folder only; never other apps' data).
