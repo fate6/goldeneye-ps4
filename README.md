@@ -14,6 +14,10 @@ reconstructed C, rebuilt from the
 [GoldenEye 007 decompilation](https://github.com/n64decomp/007), compiled
 for your PC and running from your own ROM.
 
+> [!NOTE]
+> **PS4 build:** this fork adds a PS4 homebrew target. See **[PS4.md](PS4.md)** for
+> installing, building and credits. The rest of this README is the upstream PC port's.
+
 **[Download the latest release](https://github.com/jkdansereau/goldeneye-pc-port/releases)**,
 then follow the [Quick start](#quick-start).
 
