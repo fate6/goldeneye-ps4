@@ -66,6 +66,42 @@ bash tools_ps4/package.sh 01.00
 The full step-by-step guide, from a fresh Ubuntu to an installed package, is
 **[docs/ps4-building.md](docs/ps4-building.md)**.
 
+## Changing the package art
+
+The package art is the icon and background the PS4 home screen shows. The
+repository ships an original placeholder; the game itself is not affected.
+
+| File | Shown as | Format |
+|---|---|---|
+| `icon0.png` | the app icon (required) | PNG, exactly 512 x 512, RGB |
+| `pic1.png` | the background behind the icon (optional) | PNG, exactly 1920 x 1080, RGB |
+
+`tools_ps4/package.sh` copies every PNG from **one** folder into the package
+(`sce_sys/`), picked in this order:
+
+1. the folder named by `GE_PS4_ART=<dir>`, if set;
+2. `tools_ps4/sce_sys.local/`, if it exists (gitignored, so your art never ends
+   up in a commit). When this folder exists it replaces the whole set: put
+   `pic1.png` in it too, or the package has no background;
+3. `tools_ps4/sce_sys/`, the placeholder (made by
+   `tools_ps4/make-placeholder-art.py`).
+
+So, to use your own art:
+
+```
+mkdir -p tools_ps4/sce_sys.local
+cp my-icon.png       tools_ps4/sce_sys.local/icon0.png
+cp my-background.png tools_ps4/sce_sys.local/pic1.png
+bash tools_ps4/package.sh 01.00
+```
+
+No rebuild is needed: only `package.sh` reads the art. The script prints
+`package art: <folder>` so you can see which set went in. On the console,
+uninstall the old version before installing the new package, or the home screen
+may keep showing the previous icon.
+
+Only use art you have the rights to share if you pass the package on.
+
 ## How it works
 
 - `port/ps4/`: the platform layer (VideoOut presentation, pads, audio, system

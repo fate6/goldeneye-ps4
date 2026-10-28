@@ -119,9 +119,8 @@ bash tools_ps4/package.sh 01.00        # -> ~/dolphinps4-build/out/IV0000-GOLD00
   If you also build DolphinPS4 from the same tree, run its `scripts/build-mesa.sh`
   again before that.
 - `build.sh configure` reconfigures from scratch; the logs are in `build-ps4-logs/`.
-- Package art: the placeholder in `tools_ps4/sce_sys/` is used unless
-  `tools_ps4/sce_sys.local/` (gitignored) holds your own `icon0.png` (512x512) and
-  optional `pic1.png` (1920x1080), or `GE_PS4_ART=<dir>` names another folder.
+- Package art (home screen icon and background): see
+  [Changing the package art](../PS4.md#changing-the-package-art).
 
 ## 8. Game data from your ROM
 
