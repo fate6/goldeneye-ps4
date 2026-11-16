@@ -52,6 +52,7 @@ typedef struct {
     uint8_t reserved[125];
 } Ps4SystemServiceStatus;
 int sceSystemServiceGetStatus(Ps4SystemServiceStatus *status);
+int sceSystemServiceHideSplashScreen(void);
 int32_t sceKernelIsNeoMode(void);
 
 /* DolphinPS4's runtime wraps mmap (large anonymous maps go to the system
@@ -194,6 +195,10 @@ static void ps4LoadModules(void)
         int r = sceSysmoduleLoadModuleInternal(mods[i].id);
         ps4Log("[ps4] module %s: %#x", mods[i].name, (unsigned)r);
     }
+    /* The launcher's splash (the package's pic1 art) stays on top until the
+     * app dismisses it; without this it covers the game forever. */
+    int splash = sceSystemServiceHideSplashScreen();
+    ps4Log("[ps4] hide splash: %#x", (unsigned)splash);
 }
 
 /* Read a whole small text file (NUL-terminated, malloc'd), or NULL. */
